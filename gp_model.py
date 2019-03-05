@@ -1,5 +1,6 @@
 ### Dependent packages ###
 import time
+import sys, os
 import numpy as np
 import scipy as sp
 import pandas as pd
@@ -9,6 +10,8 @@ from scipy import optimize
 from sklearn.metrics.pairwise import euclidean_distances as sklear_euclidean_distances
 
 ### Custom imports ###
+print(os.path.dirname(os.path.realpath('__file__')))
+sys.path.append(os.path.dirname(os.path.realpath('__file__'))) 
 from util.div import formattime, len_none
 from util.linalg import jitchol, try_jitchol, triang_solve, mulinv_solve, chol_inv, traceprod, nearestPD
 from util.stats import norm_cdf_int, norm_cdf_int_approx, normal_cdf_approx, mode_from_samples

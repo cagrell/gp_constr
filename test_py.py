@@ -1,16 +1,14 @@
 
-# from gp_model import kernel_RBF, GPmodel
-# import pyDOE
-# import numpy as np
-# import itertools
+from gp_model import kernel_RBF, GPmodel
+import pyDOE
+import numpy as np
+import itertools
 
 # import scipy as sp
 # from scipy import optimize
 
-import numpy as np
-from r_functions.python_wrappers import tmvsampler, pmvnorm_sgn
-
-
+#import numpy as np
+#from r_functions.python_wrappers import tmvsampler, pmvnorm_sgn
 
 # Function to emulate
 def fun(x1, x2):
@@ -21,8 +19,6 @@ def Dfun(x1, x2):
 
 def main():
     print('testing..')
-
-    #_load_R()
 
     # Design data
     n_samples = 5
@@ -44,34 +40,34 @@ def main():
     model.Y_training = y_design
 
     # Optimize
-    model.optimize_unconstrained(method = 'ML', fix_likelihood = True)
+    model.optimize(include_constraint = False, fix_likelihood = True)
         
     print(model)
 
-    # Derivative data
-    num_grid_der = 3
-    s_der = np.array(list(itertools.product(np.linspace(0, 1, num_grid_der), np.linspace(0, 1, num_grid_der))))
+    # # Derivative data
+    # num_grid_der = 3
+    # s_der = np.array(list(itertools.product(np.linspace(0, 1, num_grid_der), np.linspace(0, 1, num_grid_der))))
 
-    deriv_lik = 0.0001
+    # deriv_lik = 0.0001
 
-    # Update model
-    model.DX_training = s_der
-    model.DY_training = np.array([Dfun(x[0], x[1]) for x in s_der])
+    # # Update model
+    # model.DX_training = s_der
+    # model.DY_training = np.array([Dfun(x[0], x[1]) for x in s_der])
 
-    model.sgn_DY_training = np.ones(len(model.DX_training))
+    # model.sgn_DY_training = np.ones(len(model.DX_training))
 
-    # Set noise on derivatives
-    model.deriv_likelihood = deriv_lik
+    # # Set noise on derivatives
+    # model.deriv_likelihood = deriv_lik
 
-    # Run prediction
-    c_x1 = 0.5
-    c_x2 = 0.5
-    N = 100
-    x1_test = np.array([[x1, x2] for x1, x2 in zip(np.linspace(0, 1, N), c_x2*np.ones(N))])
-    x2_test = np.array([[x1, x2] for x1, x2 in zip(c_x1*np.ones(N), np.linspace(0, 1, N))])
-    X_test = np.concatenate([x1_test, x2_test])
+    # # Run prediction
+    # c_x1 = 0.5
+    # c_x2 = 0.5
+    # N = 100
+    # x1_test = np.array([[x1, x2] for x1, x2 in zip(np.linspace(0, 1, N), c_x2*np.ones(N))])
+    # x2_test = np.array([[x1, x2] for x1, x2 in zip(c_x1*np.ones(N), np.linspace(0, 1, N))])
+    # X_test = np.concatenate([x1_test, x2_test])
 
-    mean_all, var_all, perc_all, samples_all = model.calc_posterior_sgn_constrained_Z(X_test, num_samples = 1000 )
+    # mean_all, var_all, perc_all, samples_all = model.calc_posterior_sgn_constrained_Z(X_test, num_samples = 1000 )
 
 # def _scipyopt_test():
 
@@ -112,18 +108,18 @@ def main():
 
 #     main()
 
-def main_4():
-    mu = np.array([0, 0])
-    sigma = np.matrix([[1, 0.95], [0.95, 1]])
-    sgn = np.array([1, 1])
+# def main_4():
+#     mu = np.array([0, 0])
+#     sigma = np.matrix([[1, 0.95], [0.95, 1]])
+#     sgn = np.array([1, 1])
 
-    t = pmvnorm_sgn(mu, sigma, sgn)
+#     t = pmvnorm_sgn(mu, sigma, sgn)
 
-    print(t)
+#     print(t)
 
-    z_prime_samples = tmvsampler(10, mu, sigma, sgn, algorithm = 'rejection')
+#     z_prime_samples = tmvsampler(10, mu, sigma, sgn, algorithm = 'rejection')
 
-    print(z_prime_samples)
+#     print(z_prime_samples)
 
 if __name__ == "__main__":
-    main_4()
+    main()
