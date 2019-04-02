@@ -1,22 +1,15 @@
 
-from gp_model import kernel_RBF, GPmodel
+# For checking that importing the model with R dependency works ok
+
+from GPConstr.model import kernel_RBF, GPmodel, Constraint
 import pyDOE
 import numpy as np
-import itertools
-
-# import scipy as sp
-# from scipy import optimize
-
-#import numpy as np
-#from r_functions.python_wrappers import tmvsampler, pmvnorm_sgn
 
 # Function to emulate
 def fun(x1, x2):
     return (x1*2)**2 + np.sin(x2*5)
 
-def Dfun(x1, x2):
-    return 8*x1
-
+# Define a model and print it
 def main():
     print('testing..')
 
