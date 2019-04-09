@@ -1,7 +1,7 @@
 # GPConstr - Gaussian Process regression with linear operator constraints
 Python module for constrained GP regression. 
 
-Code based on the paper [_C. Agrell (2019) Gaussian processes with linear operator inequality constraints_](https://arxiv.org/abs/1901.03134). The current implementation covers boundedness of the function to estimate, combined with bounds on its first order partial derivatives, using the RBF kernenel. 
+Code based on the paper [_C. Agrell (2019) Gaussian processes with linear operator inequality constraints_](https://arxiv.org/abs/1901.03134). The current implementation covers boundedness of the function to estimate, combined with bounds on its first order partial derivatives, using the RBF kernel. 
 
 ### Prerequisites
 Besides the standard numpy/scipy libraries, [rpy2](https://pypi.org/project/rpy2/) is used to access some useful R packages for working with the truncated multivariate normal distribution. The code has been tested with the following requirements: 
