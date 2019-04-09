@@ -23,6 +23,7 @@ __R (3.4.3)__
 Some examples are given in jupyter notebooks
 - [__Example_1.ipynb__](https://github.com/cagrell/gp_constr/blob/master/Example_1.ipynb) _1D example of boundedness and monotonicity constraints_
 - [__Example_2.ipynb__](https://github.com/cagrell/gp_constr/blob/master/Example_2.ipynb) _1D example with noise and hyperparameter optimization_
+- [__Example_3.ipynb__](https://github.com/cagrell/gp_constr/blob/master/Example_3.ipynb) _Emulation in 4D with derivative information_
 
 ### Further work
 We will be including other types of constraints and kernels as needed, either buidling on the current implementation or on a suitable GP library with good functionality for kernel manupulation such as e.g. [GPflow](https://github.com/GPflow/GPflow)
