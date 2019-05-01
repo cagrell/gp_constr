@@ -374,7 +374,7 @@ class GPmodel():
     
     def calc_posterior_constrained(self, XS, compute_mode = False, num_samples = 1000, save_samples = 10, percentiles = [10, 50, 90], algorithm = 'minimax_tilting', resample = False):
         """
-        Calculate constraied predictive posterior distribution f* | Y, C
+        Calculate constrained predictive posterior distribution f* | Y, C
         
         Returns: mean, variance, percentiles, mode, samples
         
@@ -383,7 +383,7 @@ class GPmodel():
         """
         
         # Check that there are any constraints
-        assert self.__has_xv(), 'No constraints or no virtual points speficied for any constraint'
+        assert self.__has_xv(), 'No constraints or no virtual points specified for any constraint'
         
         # Check input
         self._check_XY_training()
@@ -471,6 +471,64 @@ class GPmodel():
             print('WARNING: covariance matrix not PD! -- used closest PD matrix, error = {}'.format(err_pd))
             
         return mean, var, perc, mode, samples
+
+    def calc_posterior_constrained_moments(self, XS):
+        """
+        Calculate first two moments of constranied predictive posterior distribution f* | Y, C
+        
+        Returns: mean = E[f* | Y, C], cov  = cov[f* | Y, C]
+        
+        """
+        
+        # Check that there are any constraints
+        assert self.__has_xv(), 'No constraints or no virtual points specified for any constraint'
+        
+        # Check input
+        self._check_XY_training()
+        self._check_constraints()
+        assert len(XS.shape) == 2, 'Test data XS must be 2d array'
+        
+        # Start timer
+        t0 = time.time()
+        
+        # Calculations only depending on (X, Y)
+        self._prep_Y_centered()
+        self._prep_K_w(verbatim = self.verbatim)
+        self._prep_K_w_factor(verbatim = self.verbatim)
+       
+        # Calculations only depending on (X, XS) - v2, A2 and B2
+        self._prep_1(XS, verbatim = self.verbatim)
+        
+        # Calculations only depending on (X, XV) - v1, A1 and B1
+        self._prep_2(verbatim = self.verbatim)
+        
+        # Calculate mean of constraint distribution (covariance is B1)
+        Lmu, constr_mean = self._calc_constr_mean()
+        
+        # Get bound vectors for constraint distribution
+        LB, UB = self._calc_constr_bounds()
+        
+        # Calculate mean and covariance of constrained GP - A, B and Sigma
+        self._prep_3(XS, verbatim = self.verbatim)
+        
+        # Compute moments of truncated variables (the virtual observations subjected to the constraint)
+        t1 = time.time()
+        if self.verbatim: print("..computing moments of C~|C, Y (from truncated Gaussian)", end = '')
+        trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
+        trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
+        if self.verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
+
+        # Compute moments of f* | Y, C
+        t1 = time.time()
+        if self.verbatim: print("..computing moments of f*|C, Y", end = '')
+
+        mean = self.mean + self.B*self.Y_centered + self.A*(trunc_mu - Lmu) 
+        cov = self.Sigma + self.A*trunc_cov*self.A.T
+        
+        if self.verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
+        if self.verbatim: print(' DONE - Total time: {}'.format(formattime(time.time() - t0)))
+                      
+        return mean, cov
     
     def constrprob_Xv(self, nu = 0, posterior = True):
         """        
@@ -742,10 +800,10 @@ class GPmodel():
             loglik_constr = np.log(self.constrprob_Xv(posterior = True)) # P(C|Y)
             
             if args[1] == False:
-                return -(loglik_unconstr + loglik_constr)
+                return -(loglik_unconstr + loglik_constr) # P(Y, C)
             else:
                 loglik_constr_cond = np.log(self.constrprob_Xv(posterior = False)) # P(C)
-                return -(loglik_unconstr + loglik_constr - loglik_constr_cond)
+                return -(loglik_constr + loglik_constr_cond - loglik_unconstr) # P(Y|C)
         
         # Initial guess (not used for differential_evolution)
         if fix_likelihood:

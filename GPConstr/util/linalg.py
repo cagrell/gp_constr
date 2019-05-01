@@ -125,7 +125,7 @@ def jitchol(A, maxtries = 5):
         while num_tries <= maxtries and np.isfinite(jitter):
             try:
                 L = sp.linalg.cholesky(A + np.eye(A.shape[0]) * jitter, lower=True)
-                print('chol jitter added..', jitter)
+                print('(!chol jitter added : '+ jitter + ')', end = '')
                 return L
             except:
                 jitter *= 10
