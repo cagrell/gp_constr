@@ -13,7 +13,7 @@ from sklearn.metrics.pairwise import euclidean_distances as sklear_euclidean_dis
 print('Loading constrained GP module from ' + os.path.dirname(os.path.realpath('__file__')))
 from .util.div import formattime, len_none
 from .util.linalg import jitchol, try_jitchol, triang_solve, mulinv_solve, chol_inv, traceprod, nearestPD
-from .util.stats import norm_cdf_int, norm_cdf_int_approx, normal_cdf_approx, mode_from_samples
+from .util.stats import norm_cdf_int, norm_cdf_int_approx, normal_cdf_approx, mode_from_samples, trunc_norm_moments_approx_corrfree
 
 ##################################################################################
 ### Loading R functions -- this is a hack to make R and scipy not crash....... ###
@@ -472,10 +472,12 @@ class GPmodel():
             
         return mean, var, perc, mode, samples
 
-    def calc_posterior_constrained_moments(self, XS):
+    def calc_posterior_constrained_moments(self, XS, corr_free_approx = False):
         """
         Calculate first two moments of constranied predictive posterior distribution f* | Y, C
         
+        corr_free_approx = True -> Uses correlation free approximation
+
         Returns: mean = E[f* | Y, C], cov  = cov[f* | Y, C]
         
         """
@@ -514,8 +516,16 @@ class GPmodel():
         # Compute moments of truncated variables (the virtual observations subjected to the constraint)
         t1 = time.time()
         if self.verbatim: print("..computing moments of C~|C, Y (from truncated Gaussian)", end = '')
-        trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
-        trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
+        
+        if corr_free_approx:
+            # Using correlation free approximation
+            tmu, tvar = trunc_norm_moments_approx_corrfree(mu = np.array(constr_mean).flatten(), sigma = self.B1, LB = LB, UB = UB)
+            trunc_mu, trunc_cov = np.matrix(tmu).T, np.matrix(np.diag(tvar))
+        else:
+            # Using mtmvnorm algorithm 
+            trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
+            trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
+
         if self.verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
 
         # Compute moments of f* | Y, C

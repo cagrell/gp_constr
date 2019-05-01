@@ -31,7 +31,7 @@ def normal_cdf_approx(x):
     p = 0.2316419
     b = [0.319381530, -0.356563782, 1.781477937, -1.821255978, 1.330274429]
     
-    xx = abs(x) # Approximation only workx for x > 0, return 1 - p otherwise
+    xx = abs(x) # Approximation only works for x > 0, return 1 - p otherwise
     
     t = 1/(1 + p*xx)
     Z = (1/(np.sqrt(2*np.pi)))*np.exp(-(x*x)/2)
@@ -73,8 +73,43 @@ def mode_from_samples(samples, bandwidth_fraction = 0.1):
         args = (kde, )
         bounds = [(min_x, max_x)]
 
-        res = optimize.differential_evolution(optfun, bounds = bounds, args = args)
+        res = sp.optimize.differential_evolution(optfun, bounds = bounds, args = args)
 
         mode[i] = res.x[0]
         
     return mode
+
+def trunc_norm_moments_approx_corrfree(mu, sigma, LB, UB, inf_num = 1E100):
+    """ 
+    Correlation free approximation of truncated moments of multivariate Gaussian
+    
+    If X~N(mu, sigma), compute expectation and variance of X | LB <= X <= UB
+    
+    Input: 
+    mu, LB, UB : 1D numpy arrays
+    sigma : numpy matrix
+    inf_num : inf values are replaced with this number in calculations
+    
+    Returns:
+    tmu, tvar (expectation and variance of truncated variable)
+    """
+    
+    s2 = np.diag(sigma)
+    s = np.sqrt(s2)
+    a = (LB - mu )/s
+    b = (UB - mu )/s
+    
+    # Replace inf and -inf by numbers
+    a[a == float('inf')] = inf_num
+    a[a == float('-inf')] = -inf_num
+    b[b == float('inf')] = inf_num
+    b[b == float('-inf')] = -inf_num
+    
+    phi_a = sp.stats.norm.pdf(a)
+    phi_b = sp.stats.norm.pdf(b)
+    PHI_diff = normal_cdf_approx(b) - normal_cdf_approx(a)
+    
+    tmu = mu + s*(phi_a - phi_b)/PHI_diff
+    tvar = s2*(1 + (a*phi_a - b*phi_b)/PHI_diff - ((phi_a - phi_b)/PHI_diff)**2)
+    
+    return tmu, tvar
