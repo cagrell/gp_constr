@@ -691,7 +691,7 @@ class GPmodel():
             x_min_i = []
             for i in i_range:
 
-                success, x_min, pc_min = self._argmin_pc_subop(i, bounds = bounds, nu = nu, opt_method = 'differential_evolution', sampling_alg = algorithm, verbatim = False)
+                success, x_min, pc_min = self._argmin_pc_subop(i, bounds = bounds, nu = nu, opt_method = 'differential_evolution', sampling_alg = algorithm, verbatim = False, num_samples = num_samples)
 
                 if success:
                     pc_min_i.append(pc_min)
@@ -1051,9 +1051,96 @@ class GPmodel():
             probs = probs.mean(axis = 1)
             
         # Return probability
-        return probs
+        return probs, mu, std
 
+    def _constrprob_xs_2_momentapprox(self, XS, i, nu, algorithm, verbatim = False):
+        """
+        Return the probability that the i-th constraint is satisfied at XS using moment approximation
+
+        algorithm =  'correlation-free' -> Using correlation free approximation
+        algorithm =  'mtmvnorm' -> Using R-package mtvmnorm 
+        algorithm =  'Genz' -> NOT YET IMPLEMENTED! (Using Genz approximation)
+
+        C~(XS) | Y, C
+        """
+
+        assert algorithm in ['correlation-free', 'mtmvnorm'], 'unknown algorithm = ' + algorithm
+
+        # Calculations only depending on (X, Y)
+        self._prep_Y_centered()
+        self._prep_K_w(verbatim = verbatim)
+        self._prep_K_w_factor(verbatim = verbatim)
         
+        # Calculations only depending on (X, XV) - v1, A1 and B1
+        self._prep_2(verbatim = verbatim)
+        
+        # Calculate mean of constraint distribution at XV (covariance is B1)
+        Lmu_XV, constr_mean = self._calc_constr_mean()
+
+        # Get bound vectors for constraint distribution
+        LB, UB = self._calc_constr_bounds()
+        
+        # c_v2, c_A2 and c_B2
+        c_v2, c_A2, c_B2 = self._constr_prep_1(XS, i)
+        
+        # c_A, c_B and c_Sigma
+        c_A, c_B, c_Sigma = self._constr_prep_2(XS, i, c_v2, c_A2, c_B2)
+               
+        # Compute moments of truncated variables (the virtual observations subjected to the constraint)
+        t1 = time.time()
+        if self.verbatim: print("..computing moments of C~|C, Y (from truncated Gaussian)", end = '')
+        
+        if algorithm =='correlation-free':
+            # Using correlation free approximation
+            tmu, tvar = trunc_norm_moments_approx_corrfree(mu = np.array(constr_mean).flatten(), sigma = self.B1, LB = LB, UB = UB)
+            trunc_mu, trunc_cov = np.matrix(tmu).T, np.matrix(np.diag(tvar))
+        else:
+            # Using mtmvnorm algorithm 
+            trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
+            trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
+
+        if self.verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
+
+        # Compute moments of Lf* | Y, C
+        t1 = time.time()
+        if self.verbatim: print("..computing moments of Lf*|C, Y", end = '')
+
+        # Prior mean
+        if i == 0:
+            # Boundedness
+            Lmu = np.matrix(np.zeros(len(XS))).T
+            
+        else:
+            # Derivative
+            Lmu = np.matrix(self.mean*np.ones(len(XS))).T
+        
+        # Posterior mean
+        mean = Lmu + c_B*self.Y_centered + c_A*(trunc_mu - Lmu_XV)
+        
+        # Posterior standard deviation
+        std = np.sqrt(np.diagonal(c_Sigma + c_A*trunc_cov*c_A.T))
+        
+        if self.verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
+
+        # Get bound vectors for constraint distribution
+        LB, UB = self.calc_constr_bounds_subop(XS, i)
+
+        # Widen intervals with nu
+        LB = LB - nu
+        UB = UB + nu
+
+        # Calculate probability that the constraint holds at each XS individually 
+        # for each sample C_j and take the average over C_j
+        if XS.shape[0] == 1:
+            # Faster for single input
+            probs = norm_cdf_int_approx(np.array(mean)[0], std, LB, UB)
+            
+        else:
+            probs = np.apply_along_axis(norm_cdf_int_approx, axis = 0, arr = np.array(mean), std = std, LB = LB, UB = UB)
+            
+        # Return probability
+        return probs, mean, std
+
     def _sample_constr_XV(self, m, mu, sigma, LB, UB, algorithm, resample = False, verbatim = True):
         """ 
         Generate m samples from the constraint distribution
