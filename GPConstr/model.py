@@ -1051,7 +1051,8 @@ class GPmodel():
             probs = probs.mean(axis = 1)
             
         # Return probability
-        return probs, mu, std
+        #return probs, mu, std
+        return probs
 
     def _constrprob_xs_2_momentapprox(self, XS, i, nu, algorithm, verbatim = False):
         """
