@@ -540,16 +540,20 @@ class GPmodel():
                       
         return mean, cov
     
-    def constrprob_Xv(self, nu = 0, posterior = True):
+    def constrprob_Xv(self, nu = 0, posterior = True, algorithm = 'minimax_tilting', n = 10E4):
         """        
         Calculate the probability that the constraint holds at XV 
         
         posterior = False : Return P(C)
         posterior = True  : Return P(C | Y)
+
+        algorithm = 'GenzBretz' or 'minimax_tilting'
         """
-        
+
         # Check input
         self._check_constraints()
+
+        assert algorithm in ['GenzBretz', 'minimax_tilting'], 'unknown algorithm = ' + algorithm
         
         # Get bound vectors for constraint distribution
         LB, UB = self._calc_constr_bounds()
@@ -575,7 +579,7 @@ class GPmodel():
             Lmu, constr_mean = self._calc_constr_mean()
 
             # Calculate probability that the constraint holds at XV
-            return pmvnorm(constr_mean, self.B1, LB, UB)
+            return pmvnorm(constr_mean, self.B1, LB, UB, algorithm, n)
         
         else:
             
@@ -588,10 +592,10 @@ class GPmodel():
             cov = L1L2T_K_xv_xv + self.constr_likelihood*np.identity(n)  
             
             # Calculate probability that the constraint holds at XV
-            return pmvnorm(Lmu, cov, LB, UB)
+            return pmvnorm(Lmu, cov, LB, UB, algorithm, n)
 
                 
-    def optimize(self, include_constraint = True, fix_likelihood = False, bound_min = 1e-6, conditional = False):
+    def optimize(self, include_constraint = True, fix_likelihood = False, bound_min = 1e-6, conditional = False, pc_alg = 'minimax_tilting', n = 100):
         """
         Optimize hyperparameters using MLE
         
@@ -599,13 +603,16 @@ class GPmodel():
         fix_likelihood = False -> Don't optimize GP likelihood parameter self.likelihood
         bound_min = minimum value in parameter bounds = (bound_min, ...)
         conditional = False -> used only for constrained optimization
+
+        pc_alg = 'GenzBretz' or 'minimax_tilting' -> algorithm used to compute P(C)
+        n -> number of samples used in pc_alg
         """
         
         has_constr = self.__has_xv() # If there are any virtual points specified
         
         if has_constr and include_constraint:
             # Optimize with constraint
-            self._optimize_constrained(fix_likelihood = fix_likelihood, bound_min = bound_min, conditional = conditional)
+            self._optimize_constrained(fix_likelihood = fix_likelihood, bound_min = bound_min, conditional = conditional, algorithm = pc_alg, n = n)
             
         else:
             # Optimize without constraint
@@ -795,13 +802,16 @@ class GPmodel():
                 print('WARNING -- NO CONVERGENCE IN OPTIMIZATION -- Total time: {}'.format(formattime(time.time() - t0)))
     
     
-    def _optimize_constrained(self, fix_likelihood = False, opt_method = 'differential_evolution', bound_min = 1e-6, conditional = False):
+    def _optimize_constrained(self, fix_likelihood = False, opt_method = 'differential_evolution', bound_min = 1e-6, conditional = False, algorithm = 'minimax_tilting', n = 10E4):
         """
         Optimize hyperparameters of unconstrained GP
         
         fix_likelihood = False -> Don't optimize GP likelihood parameter self.likelihood
         bound_min = minimum value in parameter bounds = (bound_min, ...)
         conditional = False -> maximize P(Y, C), otherwise maximize P(Y|C)
+
+        algorithm = 'GenzBretz' or 'minimax_tilting' -> algorithm used to compute P(C)
+        n -> number of samples used in 'GenzBretz' or 'minimax_tilting'
         """
         
         # Start timer
@@ -819,12 +829,12 @@ class GPmodel():
             self.__setparams(theta, not args[0])
             
             loglik_unconstr = self._loglik_unconstrained() # P(Y)
-            loglik_constr = np.log(self.constrprob_Xv(posterior = True)) # P(C|Y)
+            loglik_constr = np.log(self.constrprob_Xv(posterior = True, algorithm = args[2], n = args[3])) # P(C|Y)
             
             if args[1] == False:
                 return -(loglik_unconstr + loglik_constr) # P(Y, C)
             else:
-                loglik_constr_cond = np.log(self.constrprob_Xv(posterior = False)) # P(C)
+                loglik_constr_cond = np.log(self.constrprob_Xv(posterior = False, algorithm = args[2], n = args[3])) # P(C)
                 return -(loglik_constr + loglik_constr_cond - loglik_unconstr) # P(Y|C)
         
         # Initial guess (not used for differential_evolution)
@@ -848,7 +858,7 @@ class GPmodel():
             bounds = bounds + [(bound_min, ker_len_scale*theta[i+2]) for i in range(len(theta)-2)]
         
         # Run global optimization
-        args = (fix_likelihood, conditional)
+        args = (fix_likelihood, conditional, algorithm, n)
         
         if opt_method == 'differential_evolution':
             res = optimize.differential_evolution(optfun, bounds = bounds, args = args)

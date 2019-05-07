@@ -35,12 +35,25 @@ rtmvnorm_w <- function(n, mu, sigma, a, b, algorithm = "gibbs"){
 
 # For calculating probability over rectangle given by [a, b]
 # (Same as acceptance rate for rejection sampling)
-pmvnorm_w <- function(mu, sigma, a, b) {
+pmvnorm_w <- function(mu, sigma, a, b, algorithm = "GenzBretz", n = 10^4) {
+
+  # Some different available algorithms:
+  #'GenzBretz'       - (from mvtnorm)
+  #'minimax_tilting' - Minimax tilting (from TruncatedNormal)
+
+  # n = numer of simulations
   
   rownames(sigma) <- colnames(sigma)
   
-  return(as.numeric(pmvnorm(lower=a, upper=b, mean=mu, sigma=sigma)))
-  
+  if (algorithm == "GenzBretz") {
+    return(as.numeric(pmvnorm(lower=a, upper=b, mean=mu, sigma=sigma)))
+  }
+
+  if (algorithm == "minimax_tilting") {
+    x=mvNcdf(a - mu, b - mu, sigma, n)
+    return(as.numeric(x$prob))
+  }
+
 }
 
 # For calculating moments of truncated multivariate normal

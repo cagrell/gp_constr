@@ -60,12 +60,12 @@ def rtmvnorm(n, mu, sigma, a, b, algorithm = 'gibbs'):
     
     return X
 
-def pmvnorm(mu, sigma, a, b):
+def pmvnorm(mu, sigma, a, b, algorithm, n = 1E4):
     """ Returns probability over rectangle given by [a, b] """
     # Convert to R objects
     r_mu, r_sigma, r_a, r_b = param_py_to_r(mu, sigma, a, b)
     
-    return np.array(r_pmvnorm(r_mu, r_sigma, r_a, r_b))[0]
+    return np.array(r_pmvnorm(r_mu, r_sigma, r_a, r_b, algorithm, n))[0]
 
 def mtmvnorm(mu, sigma, a, b):
     """ Returns moments of truncated multivariate normal """
