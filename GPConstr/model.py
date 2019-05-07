@@ -213,7 +213,7 @@ class Constraint():
 class GPmodel():
     """ GP model """
     
-    def __init__(self, kernel, likelihood = 1, mean = 0, verbatim = True):
+    def __init__(self, kernel, likelihood = 1, mean = 0, constr_likelihood = 1E-6, verbatim = True):
         
         ### Prior model input ##################################
         
@@ -221,7 +221,7 @@ class GPmodel():
         self.kernel = kernel # Object containing kernel function and its derivatives
         self.mean = mean # Constant mean function
         self.likelihood = likelihood
-        self.constr_likelihood = 0 # Assuming noise free observations of constraint. Can increase this for stability
+        self.constr_likelihood = constr_likelihood # 0 = noise free observations of constraint. Can increase this for stability
         
         # Design data
         self.X_training = None
@@ -615,7 +615,7 @@ class GPmodel():
             self._optimize_unconstrained(method = 'ML', fix_likelihood = fix_likelihood, bound_min = bound_min)
             
     
-    def find_XV_subop(self, bounds, p_target, i_range = None, nu = None, max_iterations = 200, num_samples = 1000, min_prob_unconstr_xv = 1E-10, algorithm = 'minimax_tilting', print_intermediate = True):
+    def find_XV_subop(self, bounds, p_target, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = 1E-10, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'differential_evolution', print_intermediate = True):
         """
         Find the set of virtual observations needed for a set of sub-operators
         
@@ -627,12 +627,24 @@ class GPmodel():
                   *** if i_range = None then all sub-operators are included ***
         
         max_iterations = maximum number of iterations
-        num_samples = number of samples to use in estimation of constraint probability
-        algorithm = algorithm used to sample from truncated Gaussian ('rejection', 'gibbs' or 'minimax_tilting')
+
         print_intermediate = True -> Print intermediate steps
         
         min_prob_unconstr_xv = Minimum probability that the constraint holds at XV using the unconstrained distribution
         (using this as a stopping criterion when rejection sampling is used)
+
+        Global optimizer:
+        opt_method = 'differential_evolution' or 'basinhopping'
+
+        --- The choice of algorithm used to compute the constraint probability ---
+
+        moment_approximation = False -> Estimate constraint probability using samples of the constraint process
+            num_samples = number of samples to use in estimation of constraint probability
+            sampling_alg = algorithm used to sample from truncated Gaussian ('rejection', 'gibbs' or 'minimax_tilting')
+
+        moment_approximation = True -> Use moment approximation (Assume Gaussian distribution using moments of the constraint process)
+            moment_alg = 'correlation-free', 'mtmvnorm'
+
         """
         
         # Set list of sub-operators if not specified
@@ -645,7 +657,7 @@ class GPmodel():
             if self.constr_deriv is not None:
                 i_range = i_range + [i+1 for i in range(len(self.constr_deriv))] 
         
-        if min_prob_unconstr_xv < 1E-6 and algorithm == 'rejection':
+        if min_prob_unconstr_xv < 1E-6 and not moment_approximation and sampling_alg == 'rejection':
             if self.verbatim: print('WARNING: very low acceptance rate criterion for rejection sampling. min_prob_unconstr_xv = ' + str(min_prob_unconstr_xv))
         
         # Start timer
@@ -691,7 +703,7 @@ class GPmodel():
             x_min_i = []
             for i in i_range:
 
-                success, x_min, pc_min = self._argmin_pc_subop(i, bounds = bounds, nu = nu, opt_method = 'differential_evolution', sampling_alg = algorithm, verbatim = False, num_samples = num_samples)
+                success, x_min, pc_min = self._argmin_pc_subop(i, nu, bounds, opt_method, moment_approximation, sampling_alg, moment_alg, False, num_samples)
 
                 if success:
                     pc_min_i.append(pc_min)
@@ -855,7 +867,7 @@ class GPmodel():
                 print('WARNING -- NO CONVERGENCE IN OPTIMIZATION -- Total time: {}'.format(formattime(time.time() - t0)))
     
     
-    def _argmin_pc_subop(self, i, nu, bounds, opt_method = 'differential_evolution', sampling_alg = 'rejection', verbatim = False, num_samples = 1000):
+    def _argmin_pc_subop(self, i, nu, bounds, opt_method = 'differential_evolution', moment_approximation = False, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', verbatim = False, num_samples = 1000):
         """
         Finds smallest probability that the constraint is satisfied for
         the i-th sub-operator
@@ -866,9 +878,12 @@ class GPmodel():
         Global optimizer:
         opt_method = 'differential_evolution' or 'basinhopping'
         
-        Sampling:
-        sampling_alg = 'rejection', 'gibbs' or 'minimax_tilting'
+        moment_approximation = False -> Use sampling based method
+            sampling_alg = 'rejection', 'gibbs' or 'minimax_tilting'
         
+        moment_approximation = True -> Use moment approximation
+            moment_alg = 'correlation-free', 'mtmvnorm'
+
         Returns:
         sucess = True/False
         x = argmin
@@ -904,23 +919,41 @@ class GPmodel():
         else:
             if verbatim: print('Optimizing using estimated constraint probability with {} samples'.format(num_samples))
             
-            args = (i, nu, num_samples, sampling_alg)
-            
-            def optfun(x, *args):
-                i = args[0]
-                nu = args[1]
-                num_samples = args[2]
-                algorithm = args[3]
+            if moment_approximation:
+                # Use moment approximation of constraint probability
                 
-                p_c = self._constrprob_xs_2(np.array(x).reshape(1, -1), i, nu, num_samples, algorithm, verbatim = False)[0]
-                if p_c < min_prob_log: p_c = min_prob_log
-                return np.log(p_c)
+                args = (i, nu, moment_alg)
+                
+                def optfun(x, *args):
+                    i = args[0]
+                    nu = args[1]
+                    alg = args[2]
+                    
+                    p_c = self._constrprob_xs_2_momentapprox(np.array(x).reshape(1, -1), i, nu, alg, verbatim = False)[0]
+                    if p_c < min_prob_log: p_c = min_prob_log
+                    return np.log(p_c)
+
+            else:
+                # Estimate constraint probability from samples of the constrained process
+
+                args = (i, nu, num_samples, sampling_alg)
+                
+                def optfun(x, *args):
+                    i = args[0]
+                    nu = args[1]
+                    num_samples = args[2]
+                    alg = args[3]
+                    
+                    p_c = self._constrprob_xs_2(np.array(x).reshape(1, -1), i, nu, num_samples, alg, verbatim = False)[0]
+                    if p_c < min_prob_log: p_c = min_prob_log
+                    return np.log(p_c)
         
         # Run global optimization
         if opt_method == 'differential_evolution':
             res = optimize.differential_evolution(optfun, bounds = bounds, args = args)
         else:
-            res = optimize.basinhopping(optfun, x, minimizer_kwargs = {'args':args, 'bounds': bounds})
+            x0 = [0.5*(x[0] + x[1]) for x in bounds]
+            res = optimize.basinhopping(optfun, x0, minimizer_kwargs = {'args':args, 'bounds': bounds})
             res = res.lowest_optimization_result
         
         if verbatim:
@@ -1051,8 +1084,8 @@ class GPmodel():
             probs = probs.mean(axis = 1)
             
         # Return probability
-        #return probs, mu, std
         return probs
+        
 
     def _constrprob_xs_2_momentapprox(self, XS, i, nu, algorithm, verbatim = False):
         """
@@ -1089,7 +1122,7 @@ class GPmodel():
                
         # Compute moments of truncated variables (the virtual observations subjected to the constraint)
         t1 = time.time()
-        if self.verbatim: print("..computing moments of C~|C, Y (from truncated Gaussian)", end = '')
+        if verbatim: print("..computing moments of C~|C, Y (from truncated Gaussian)", end = '')
         
         if algorithm =='correlation-free':
             # Using correlation free approximation
@@ -1100,11 +1133,11 @@ class GPmodel():
             trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
             trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
 
-        if self.verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
+        if verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
 
         # Compute moments of Lf* | Y, C
         t1 = time.time()
-        if self.verbatim: print("..computing moments of Lf*|C, Y", end = '')
+        if verbatim: print("..computing moments of Lf*|C, Y", end = '')
 
         # Prior mean
         if i == 0:
@@ -1121,7 +1154,7 @@ class GPmodel():
         # Posterior standard deviation
         std = np.sqrt(np.diagonal(c_Sigma + c_A*trunc_cov*c_A.T))
         
-        if self.verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
+        if verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
 
         # Get bound vectors for constraint distribution
         LB, UB = self.calc_constr_bounds_subop(XS, i)
@@ -1140,7 +1173,8 @@ class GPmodel():
             probs = np.apply_along_axis(norm_cdf_int_approx, axis = 0, arr = np.array(mean), std = std, LB = LB, UB = UB)
             
         # Return probability
-        return probs, mean, std
+        #return probs, mean, std
+        return probs
 
     def _sample_constr_XV(self, m, mu, sigma, LB, UB, algorithm, resample = False, verbatim = True):
         """ 
