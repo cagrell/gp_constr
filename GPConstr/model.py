@@ -622,7 +622,7 @@ class GPmodel():
             self._optimize_unconstrained(method = 'ML', fix_likelihood = fix_likelihood, bound_min = bound_min)
             
     
-    def find_XV_subop(self, bounds, p_target, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = 1E-10, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'differential_evolution', print_intermediate = True):
+    def find_XV_subop(self, bounds, p_target, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = 1E-10, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'shgo', print_intermediate = True):
         """
         Find the set of virtual observations needed for a set of sub-operators
         
@@ -641,7 +641,7 @@ class GPmodel():
         (using this as a stopping criterion when rejection sampling is used)
 
         Global optimizer:
-        opt_method = 'differential_evolution' or 'basinhopping'
+        opt_method = 'differential_evolution', 'basinhopping' or 'shgo'
 
         --- The choice of algorithm used to compute the constraint probability ---
 
@@ -802,7 +802,7 @@ class GPmodel():
                 print('WARNING -- NO CONVERGENCE IN OPTIMIZATION -- Total time: {}'.format(formattime(time.time() - t0)))
     
     
-    def _optimize_constrained(self, fix_likelihood = False, opt_method = 'differential_evolution', bound_min = 1e-6, conditional = False, algorithm = 'minimax_tilting', n = 10E4):
+    def _optimize_constrained(self, fix_likelihood = False, opt_method = 'shgo', bound_min = 1e-6, conditional = False, algorithm = 'minimax_tilting', n = 10E3, opt_args = {}):
         """
         Optimize hyperparameters of unconstrained GP
         
@@ -812,15 +812,20 @@ class GPmodel():
 
         algorithm = 'GenzBretz' or 'minimax_tilting' -> algorithm used to compute P(C)
         n -> number of samples used in 'GenzBretz' or 'minimax_tilting'
+
+        opt_method = 'differential_evolution', 'basinhopping', 'shgo'
+        opt_args = dict with additional arguments to optimizer
         """
         
+        assert opt_method in ['differential_evolution', 'basinhopping', 'shgo'], 'unknown opt_method = ' + opt_method
+
         # Start timer
         t0 = time.time()
         if self.verbatim: 
             if not conditional: 
-                print("..Running optimization for constrained GP - max P(Y, C) ...", end = '')
+                print("..Running optimization ({}) for constrained GP - max P(Y, C) ...".format(opt_method), end = '')
             else:
-                print("..Running optimization for constrained GP - max P(Y | C) ...", end = '')
+                print("..Running optimization ({}) for constrained GP - max P(Y | C) ...".format(opt_method), end = '')
                 
             
         # Define wrapper function for optimization
@@ -861,10 +866,14 @@ class GPmodel():
         args = (fix_likelihood, conditional, algorithm, n)
         
         if opt_method == 'differential_evolution':
-            res = optimize.differential_evolution(optfun, bounds = bounds, args = args)
-        else:
-            res = optimize.basinhopping(optfun, theta, minimizer_kwargs = {'args':args, 'bounds': bounds})
+            res = optimize.differential_evolution(optfun, bounds = bounds, args = args, **opt_args)
+
+        if opt_method == 'basinhopping':
+            res = optimize.basinhopping(optfun, theta, minimizer_kwargs = {'args':args, 'bounds': bounds}, **opt_args)
             res = res.lowest_optimization_result
+
+        if opt_method == 'shgo':
+            res = optimize.shgo(optfun, bounds = bounds, args = args, **opt_args)
         
         
         # Save results
@@ -877,7 +886,7 @@ class GPmodel():
                 print('WARNING -- NO CONVERGENCE IN OPTIMIZATION -- Total time: {}'.format(formattime(time.time() - t0)))
     
     
-    def _argmin_pc_subop(self, i, nu, bounds, opt_method = 'differential_evolution', moment_approximation = False, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', verbatim = False, num_samples = 1000):
+    def _argmin_pc_subop(self, i, nu, bounds, opt_method = 'differential_evolution', moment_approximation = False, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', verbatim = False, num_samples = 1000, return_res = False):
         """
         Finds smallest probability that the constraint is satisfied for
         the i-th sub-operator
@@ -886,7 +895,7 @@ class GPmodel():
         i > 0: df/dx_i
         
         Global optimizer:
-        opt_method = 'differential_evolution' or 'basinhopping'
+        opt_method = 'differential_evolution', 'basinhopping' or 'shgo'
         
         moment_approximation = False -> Use sampling based method
             sampling_alg = 'rejection', 'gibbs' or 'minimax_tilting'
@@ -894,7 +903,9 @@ class GPmodel():
         moment_approximation = True -> Use moment approximation
             moment_alg = 'correlation-free', 'mtmvnorm'
 
-        Returns:
+        return_res = True -> Return optimizer res object.
+        Otherwise return:
+
         sucess = True/False
         x = argmin
         y = f(x)
@@ -902,7 +913,7 @@ class GPmodel():
         
         min_prob_log = 1E-10 # Cap the constraint prob at this lower limit (for log transform)
         
-        assert opt_method in ['differential_evolution', 'basinhopping'], 'unknown opt_method = ' + opt_method
+        assert opt_method in ['differential_evolution', 'basinhopping', 'shgo'], 'unknown opt_method = ' + opt_method
         
         # Calculations only depending on (X, Y)
         self._prep_Y_centered()
@@ -961,10 +972,14 @@ class GPmodel():
         # Run global optimization
         if opt_method == 'differential_evolution':
             res = optimize.differential_evolution(optfun, bounds = bounds, args = args)
-        else:
+        
+        if opt_method == 'basinhopping':
             x0 = [0.5*(x[0] + x[1]) for x in bounds]
             res = optimize.basinhopping(optfun, x0, minimizer_kwargs = {'args':args, 'bounds': bounds})
             res = res.lowest_optimization_result
+
+        if opt_method == 'shgo':
+            res = optimize.shgo(optfun, bounds = bounds, args = args)
         
         if verbatim:
             if res.success: 
@@ -973,6 +988,7 @@ class GPmodel():
                 print('ERROR IN GLOBAL OPTIMIZATION - ' + opt_method)
         
         # Return
+        if return_res: return res
         return res.success, res.x, np.exp(res.fun)
 
     
