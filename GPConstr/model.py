@@ -802,7 +802,7 @@ class GPmodel():
                 print('WARNING -- NO CONVERGENCE IN OPTIMIZATION -- Total time: {}'.format(formattime(time.time() - t0)))
     
     
-    def _optimize_constrained(self, fix_likelihood = False, opt_method = 'shgo', bound_min = 1e-6, conditional = False, algorithm = 'minimax_tilting', n = 10E3, opt_args = {}):
+    def _optimize_constrained(self, fix_likelihood = False, opt_method = 'shgo', bound_min = 1e-6, conditional = False, algorithm = 'minimax_tilting', n = 10E3, opt_args = {}, bounds = None):
         """
         Optimize hyperparameters of unconstrained GP
         
@@ -812,6 +812,8 @@ class GPmodel():
 
         algorithm = 'GenzBretz' or 'minimax_tilting' -> algorithm used to compute P(C)
         n -> number of samples used in 'GenzBretz' or 'minimax_tilting'
+
+        bounds = None -> bounds are computed automatically (theta = [(likelihood), kernel_var, kernel_len_1, ...])
 
         opt_method = 'differential_evolution', 'basinhopping', 'shgo'
         opt_args = dict with additional arguments to optimizer
@@ -850,17 +852,18 @@ class GPmodel():
         
         # Define bounds
         # theta = [(likelihood), kernel_var, kernel_len_1, ...]
-        likelihood_scale = 10
-        ker_var_scale = 10
-        ker_len_scale = 2
+        if bounds is None:
+            likelihood_scale = 10
+            ker_var_scale = 10
+            ker_len_scale = 10
 
-        if fix_likelihood:
-            bounds = [(bound_min, ker_var_scale*theta[0])]
-            bounds = bounds + [(bound_min, ker_len_scale*theta[i+1]) for i in range(len(theta)-1)]
+            if fix_likelihood:
+                bounds = [(bound_min, ker_var_scale*theta[0])]
+                bounds = bounds + [(bound_min, ker_len_scale*theta[i+1]) for i in range(len(theta)-1)]
 
-        else:
-            bounds = [(bound_min, likelihood_scale*theta[0]), (bound_min, ker_var_scale*theta[1])]
-            bounds = bounds + [(bound_min, ker_len_scale*theta[i+2]) for i in range(len(theta)-2)]
+            else:
+                bounds = [(bound_min, likelihood_scale*theta[0]), (bound_min, ker_var_scale*theta[1])]
+                bounds = bounds + [(bound_min, ker_len_scale*theta[i+2]) for i in range(len(theta)-2)]
         
         # Run global optimization
         args = (fix_likelihood, conditional, algorithm, n)
