@@ -1057,7 +1057,7 @@ class GPmodel():
         
         # Calculations only depending on (X, Y)
         self._prep_Y_centered()
-        self._prep_K_w(verbatim = verbatim)
+        self._prep_K_w(verbatim = verbatim)+
         self._prep_K_w_factor(verbatim = verbatim)
         
         # Calculations only depending on (X, XV) - v1, A1 and B1
@@ -1359,6 +1359,23 @@ class GPmodel():
         
         return Dloglik
         
+    def _EM_Q():
+        """
+        Q function used in EM
+
+        Input:
+        g = g(theta^(t)) matrix 
+
+        Out:
+        Value of Q = Q(theta | theta^(t))
+        """
+
+        # Define covariance matrix of Y and C~
+
+        # Cholesky
+
+        Q = - (n/2)*np.log(2*np.pi) 
+    
     def __setparams(self, theta, includes_likelihood):
         """
         Set model parameters from single array theta
