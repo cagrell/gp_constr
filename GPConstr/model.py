@@ -1358,8 +1358,50 @@ class GPmodel():
         Dloglik = [Dloglik_lik] + Dloglik_ker
         
         return Dloglik
+
+    def _EM_g():
+        """
+        g function used in EM
+
+        Computed using current hyperparameters
+        """
+
+        # Calculations only depending on (X, Y)
+        self._prep_Y_centered()
+        self._prep_K_w(verbatim = self.verbatim)
+        self._prep_K_w_factor(verbatim = self.verbatim)
+              
+        # Calculations only depending on (X, XV) - v1, A1 and B1
+        self._prep_2(verbatim = self.verbatim)
         
-    def _EM_Q():
+        # Calculate mean of constraint distribution (covariance is B1)
+        Lmu, constr_mean = self._calc_constr_mean()
+        
+        # Get bound vectors for constraint distribution
+        LB, UB = self._calc_constr_bounds()
+        
+        # Compute moments of truncated variables (the virtual observations subjected to the constraint)
+        trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
+        trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
+
+        #### Return stuff for checking
+        return trunc_mu, trunc_cov, Lmu
+        ####
+
+        # Center truncated mean
+        trunc_mu = trunc_mu - Lmu
+        ### Check that it is a matrix (g also)
+
+        y_c = np.matrix(Y_centered)
+
+        # Gather blocks in matrix 
+        dg = y_c*trunc_mu.T
+        g = np.block([[y_c*y_c.T, dg], [dg.T, trunc_cov + trunc_mu*trunc_mu.T]])
+        return g
+
+
+        
+    def _EM_Q(g):
         """
         Q function used in EM
 
@@ -1369,12 +1411,23 @@ class GPmodel():
         Out:
         Value of Q = Q(theta | theta^(t))
         """
+        # Run pre calcs
+        self._prep_K_w(verbatim = False)
 
         # Define covariance matrix of Y and C~
+        L2T_K_x_xv = self._calc_L2T(self.X_training)
+        L1L2T_K_xv_xv = self._calc_L1L2()
+        self.K_w
+        Gamma = np.block([[self.K_w, L2T_K_x_xv], [L2T_K_x_xv.T, L1L2T_K_xv_xv + self.constr_likelihood*np.identity(n = L1L2T_K_xv_xv.shape[0])]])
 
         # Cholesky
+        L = np.matrix(jitchol(Gamma)) 
 
-        Q = - (n/2)*np.log(2*np.pi) 
+        # Invert Gamma using the Cholesky factor
+        Gamma_inv = chol_inv(L)
+
+        # Compute Q
+        Q = - (n/2)*np.log(2*np.pi) - np.log(np.diag(L)).sum() - 0.5*traceprod(g, Gamma_inv)  
     
     def __setparams(self, theta, includes_likelihood):
         """
