@@ -75,3 +75,10 @@ def mtmvnorm(mu, sigma, a, b):
     moments = r_mtmvnorm(r_mu, r_sigma, r_a, r_b)
     
     return np.array(moments[0]), np.array(moments[1])
+
+def moments_from_samples(n, mu, sigma, a, b, algorithm = 'minimax_tilting'):
+    """
+    Estimate moments of truncated normal from n samples
+    """
+    samples = rtmvnorm(n, mu, sigma, a, b, algorithm)
+    return samples.mean(axis = 0), np.cov(samples, rowvar = False)

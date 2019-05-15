@@ -40,7 +40,7 @@ def _scipyopt_test():
 
 print('Loading R wrapper...')
 _scipyopt_test()
-from .r_functions.python_wrappers import rtmvnorm, pmvnorm, mtmvnorm
+from .r_functions.python_wrappers import rtmvnorm, pmvnorm, mtmvnorm, moments_from_samples
 ##################################################################################
 
 class kernel_RBF():
@@ -815,11 +815,11 @@ class GPmodel():
 
         bounds = None -> bounds are computed automatically (theta = [(likelihood), kernel_var, kernel_len_1, ...])
 
-        opt_method = 'differential_evolution', 'basinhopping', 'shgo'
+        opt_method = 'differential_evolution', 'basinhopping', 'shgo', 'L-BFGS-B'
         opt_args = dict with additional arguments to optimizer
         """
         
-        assert opt_method in ['differential_evolution', 'basinhopping', 'shgo'], 'unknown opt_method = ' + opt_method
+        assert opt_method in ['differential_evolution', 'basinhopping', 'shgo', 'L-BFGS-B'], 'unknown opt_method = ' + opt_method
 
         # Start timer
         t0 = time.time()
@@ -844,7 +844,7 @@ class GPmodel():
                 loglik_constr_cond = np.log(self.constrprob_Xv(posterior = False, algorithm = args[2], n = args[3])) # P(C)
                 return -(loglik_constr + loglik_constr_cond - loglik_unconstr) # P(Y|C)
         
-        # Initial guess (not used for differential_evolution)
+        # Initial guess (not used for some global optimizers)
         if fix_likelihood:
             theta = np.array(self.kernel.get_params())
         else:
@@ -877,6 +877,9 @@ class GPmodel():
 
         if opt_method == 'shgo':
             res = optimize.shgo(optfun, bounds = bounds, args = args, **opt_args)
+
+        if opt_method == 'L-BFGS-B':
+            res = optimize.minimize(optfun, theta, args = args, bounds=bounds, method = 'L-BFGS-B', **opt_args)
         
         
         # Save results
@@ -1057,7 +1060,7 @@ class GPmodel():
         
         # Calculations only depending on (X, Y)
         self._prep_Y_centered()
-        self._prep_K_w(verbatim = verbatim)+
+        self._prep_K_w(verbatim = verbatim)
         self._prep_K_w_factor(verbatim = verbatim)
         
         # Calculations only depending on (X, XV) - v1, A1 and B1
@@ -1359,20 +1362,23 @@ class GPmodel():
         
         return Dloglik
 
-    def _EM_g():
+    def _EM_g(self, use_mtmvnorm = False, n = 1000):
         """
         g function used in EM
+
+        use_mtmvnorm = True -> mtmvnorm for truncated moments, otherwise estimate from samples using miminax-tilting
+        n = samples used to estimate moments 
 
         Computed using current hyperparameters
         """
 
         # Calculations only depending on (X, Y)
         self._prep_Y_centered()
-        self._prep_K_w(verbatim = self.verbatim)
-        self._prep_K_w_factor(verbatim = self.verbatim)
+        self._prep_K_w(verbatim = False)
+        self._prep_K_w_factor(verbatim = False)
               
         # Calculations only depending on (X, XV) - v1, A1 and B1
-        self._prep_2(verbatim = self.verbatim)
+        self._prep_2(verbatim = False)
         
         # Calculate mean of constraint distribution (covariance is B1)
         Lmu, constr_mean = self._calc_constr_mean()
@@ -1381,27 +1387,47 @@ class GPmodel():
         LB, UB = self._calc_constr_bounds()
         
         # Compute moments of truncated variables (the virtual observations subjected to the constraint)
-        trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
-        trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
+        if use_mtmvnorm:
+            trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
+            trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
+        else:
+            trunc_mu, trunc_cov = moments_from_samples(n, constr_mean, self.B1, LB, UB, algorithm = 'minimax_tilting')
 
-        #### Return stuff for checking
-        return trunc_mu, trunc_cov, Lmu
-        ####
-
-        # Center truncated mean
-        trunc_mu = trunc_mu - Lmu
-        ### Check that it is a matrix (g also)
-
-        y_c = np.matrix(Y_centered)
+        # Center truncated mean and convert to matrix
+        trunc_mu = np.matrix(trunc_mu.reshape(-1, 1) - Lmu)
+        trunc_cov = np.matrix(trunc_cov)
+        y_c = np.matrix(self.Y_centered)
 
         # Gather blocks in matrix 
         dg = y_c*trunc_mu.T
         g = np.block([[y_c*y_c.T, dg], [dg.T, trunc_cov + trunc_mu*trunc_mu.T]])
         return g
 
-
+    def _EM_Q_check(self, n):
+        """
+        Compute Q the slow way for testing
+        """
+        # Calculations only depending on (X, Y)
+        self._prep_Y_centered()
+        self._prep_K_w(verbatim = False)
+        self._prep_K_w_factor(verbatim = False)
+              
+        # Calculations only depending on (X, XV) - v1, A1 and B1
+        self._prep_2(verbatim = False)
         
-    def _EM_Q(g):
+        # Calculate mean of constraint distribution (covariance is B1)
+        Lmu, constr_mean = self._calc_constr_mean()
+        
+        # Get bound vectors for constraint distribution
+        LB, UB = self._calc_constr_bounds()
+
+        # Sample from the constraint distribution
+        C_sim = rtmvnorm(n = n, mu = constr_mean, sigma = self.B1, a = LB, b = UB, algorithm = 'minimax_tilting')
+
+        return C_sim
+        
+
+    def _EM_Q(self, g):
         """
         Q function used in EM
 
@@ -1427,8 +1453,76 @@ class GPmodel():
         Gamma_inv = chol_inv(L)
 
         # Compute Q
-        Q = - (n/2)*np.log(2*np.pi) - np.log(np.diag(L)).sum() - 0.5*traceprod(g, Gamma_inv)  
-    
+        Q = - (Gamma.shape[0]/2)*np.log(2*np.pi) - np.log(np.diag(L)).sum() - 0.5*traceprod(g, Gamma_inv)  
+
+        return Q
+
+    def _EM_update(self, fix_likelihood = False, bounds = None, n = 1000, opt_method = 'L-BFGS-B', opt_args = {}, verbatim = False):
+        """
+        Run one iteration of the EM algorithm and update hyperparameters
+
+        1. Estimate truncated moments using current hyperparameters
+        2. Optimize current hyperparameters 
+        
+        fix_likelihood = False -> Don't optimize GP likelihood parameter self.likelihood
+        n = number of samples used to estimate moments
+        opt_method = 'differential_evolution', 'basinhopping', 'shgo', 'L-BFGS-B'
+        opt_args = dict with additional arguments to optimizer
+        """
+
+        assert opt_method in ['differential_evolution', 'basinhopping', 'shgo', 'L-BFGS-B'], 'unknown opt_method = ' + opt_method
+
+        t0 = time.time()
+
+        # 1. Compute truncated moments and the matrix g(theta)
+        if verbatim: print('..Running calculation of g(theta~) ...', end = '')
+        g = self._EM_g(n = n)
+        if verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t0)))
+
+        # Initial guess (not used for some global optimizers)
+        if fix_likelihood:
+            theta = np.array(self.kernel.get_params())
+        else:
+            theta = np.array([self.likelihood] + list(self.kernel.get_params()))
+        
+        # Define bounds
+        # theta = [(likelihood), kernel_var, kernel_len_1, ...]
+        if bounds is None:
+            bound_min = 1e-6
+            num_params = self.kernel.dim + 2
+            if fix_likelihood: num_params -= 1
+            bounds = [(bound_min, None)]*num_params
+
+        # 2. Define function to optimize Q(theta, theta~)
+        def optfun(theta, *args):
+            self.reset()
+            self.__setparams(theta, not args[0])
+            return self._EM_Q(g)
+
+        # Run optimization
+        t1 = time.time()
+        if verbatim: print('..Running optimization ({}) ...'.format(opt_method), end = '')
+        
+        args = (fix_likelihood)
+
+        if opt_method == 'differential_evolution':
+            res = optimize.differential_evolution(optfun, bounds = bounds, args = args, **opt_args)
+
+        if opt_method == 'basinhopping':
+            res = optimize.basinhopping(optfun, theta, minimizer_kwargs = {'args':args, 'bounds': bounds}, **opt_args)
+            res = res.lowest_optimization_result
+
+        if opt_method == 'shgo':
+            res = optimize.shgo(optfun, bounds = bounds, args = args, **opt_args)
+
+        if opt_method == 'L-BFGS-B':
+            res = optimize.minimize(optfun, theta, args = args, bounds=bounds, method = 'L-BFGS-B', **opt_args)
+
+        if verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
+
+        # Save results
+        self.__setparams(res.x, not fix_likelihood)
+
     def __setparams(self, theta, includes_likelihood):
         """
         Set model parameters from single array theta
