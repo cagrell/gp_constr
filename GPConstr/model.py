@@ -1424,8 +1424,27 @@ class GPmodel():
         # Sample from the constraint distribution
         C_sim = rtmvnorm(n = n, mu = constr_mean, sigma = self.B1, a = LB, b = UB, algorithm = 'minimax_tilting')
 
-        return C_sim
+         # Define covariance matrix of Y and C~
+        L2T_K_x_xv = self._calc_L2T(self.X_training)
+        L1L2T_K_xv_xv = self._calc_L1L2()
+        Gamma = np.block([[self.K_w, L2T_K_x_xv], [L2T_K_x_xv.T, L1L2T_K_xv_xv + self.constr_likelihood*np.identity(n = L1L2T_K_xv_xv.shape[0])]])
+
+        # Cholesky
+        L = np.matrix(jitchol(Gamma)) 
+
+        # Invert Gamma using the Cholesky factor
+        Gamma_inv = chol_inv(L)
+
+        # Estimate Q
+        tmp = np.zeros(C_sim.shape[0])
+        for i in range(C_sim.shape[0]):
+            z = np.matrix(list(self.Y_centered.flatten()) + list(C_sim[i])).T
+            tmp[i] = (z.T*Gamma_inv*z)[0,0]
+
+        zGz = np.array(tmp).mean() 
+        Q = -0.5*zGz - (Gamma.shape[0]/2)*np.log(2*np.pi) - np.log(np.diag(L)).sum()
         
+        return Q
 
     def _EM_Q(self, g):
         """
@@ -1443,7 +1462,6 @@ class GPmodel():
         # Define covariance matrix of Y and C~
         L2T_K_x_xv = self._calc_L2T(self.X_training)
         L1L2T_K_xv_xv = self._calc_L1L2()
-        self.K_w
         Gamma = np.block([[self.K_w, L2T_K_x_xv], [L2T_K_x_xv.T, L1L2T_K_xv_xv + self.constr_likelihood*np.identity(n = L1L2T_K_xv_xv.shape[0])]])
 
         # Cholesky
