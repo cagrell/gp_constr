@@ -1435,16 +1435,26 @@ class GPmodel():
         # Invert Gamma using the Cholesky factor
         Gamma_inv = chol_inv(L)
 
+        # Invert B1
+        B1_inv = np.linalg.inv(self.B1)
+
         # Estimate Q
         tmp = np.zeros(C_sim.shape[0])
+        tmp_2 = np.zeros(C_sim.shape[0])
         for i in range(C_sim.shape[0]):
             z = np.matrix(list(self.Y_centered.flatten()) + list(C_sim[i])).T
+            c = np.matrix(C_sim[i]).T
             tmp[i] = (z.T*Gamma_inv*z)[0,0]
+            tmp_2[i] = (c.T*B1_inv*c)[0,0]
 
+        cB1c = np.array(tmp_2).mean() 
         zGz = np.array(tmp).mean() 
+        H = (self.B1.shape[0]/2)*np.log(2*np.pi) + 0.5*np.log(np.linalg.det(B1_inv)) + cB1c
+        det_1 = np.log(np.diag(L)).sum()
+        det_2 = np.log(np.linalg.det(Gamma))
         Q = -0.5*zGz - (Gamma.shape[0]/2)*np.log(2*np.pi) - np.log(np.diag(L)).sum()
         
-        return Q
+        return Q, zGz, H, det_1, det_2
 
     def _EM_Q(self, g):
         """
@@ -1515,7 +1525,7 @@ class GPmodel():
         def optfun(theta, *args):
             self.reset()
             self.__setparams(theta, not args[0])
-            return self._EM_Q(g)
+            return -self._EM_Q(g)
 
         # Run optimization
         t1 = time.time()
