@@ -5,6 +5,7 @@ import numpy as np
 import scipy as sp
 import pandas as pd
 from scipy import optimize
+import pyDOE # NB! Add to dependencies
 
 # Can replace this with custom code that does the same..
 from sklearn.metrics.pairwise import euclidean_distances as sklear_euclidean_distances
@@ -621,7 +622,78 @@ class GPmodel():
         
             self._optimize_unconstrained(method = 'ML', fix_likelihood = fix_likelihood, bound_min = bound_min)
             
-    
+    def initiate_XV_LHS(self, n_lhs, p_target, nu = 0, add_points_to_model = True, max_add_pts = 200, lhs_iterations = 1000, i_range = None):
+        """
+        Initiate set of virtual observation locations by
+        1. Generating a set of n_lhs samples
+        2. Compute the constraint probability for each sample
+        3. Include each point where the constraint probability is smaller than p_target
+
+        add_points_to_model = False, just return results without adding any points to the model
+
+        Return: 
+        DataFrame with all samples and constraint probabilities for inspection
+        """
+
+        # Set list of sub-operators if not specified
+        if i_range is None:
+            i_range = []
+            
+            if self.constr_bounded is not None:
+                i_range.append(0)
+                
+            if self.constr_deriv is not None:
+                i_range = i_range + [i+1 for i in range(len(self.constr_deriv))] 
+
+        t0 = time.time()
+
+        # 1. Generate LHS samples
+        if self.verbatim: print('Generating LHS samples ...', end = '')
+        x_lhs = pyDOE.lhs(self.kernel.dim, samples = n_lhs, criterion = 'maximin', iterations = lhs_iterations)
+        print(' DONE - time: {}'.format(formattime(time.time() - t0)))
+        
+        # 2. Compute constraint probability
+        t1 = time.time()
+        if self.verbatim: print('Computing constraint probabilities ...', end = '')
+        probs = [self._constrprob_xs_1(x_lhs, i, nu) for i in i_range]
+        print(' DONE - time: {}'.format(formattime(time.time() - t1)))
+
+        # 3. Sort by minimum constraint probability
+        idx = np.array(probs).min(axis = 0).argsort()
+        probs = np.array(probs)[:, idx].T
+        x_lhs = x_lhs[idx, :]
+
+        # 3. Add points to model
+        if add_points_to_model:
+            t1 = time.time()
+            if self.verbatim: print('Adding virtual observation locations to model ...', end = '')
+            
+            num_pts_added = 0
+            for j in range(len(i_range)):
+                i = i_range[j] # Constraint number
+                for k in range(n_lhs):
+                    if probs[k][j] < p_target:
+                        # Add the location x_lhs[k] to constraint i
+                        if max_add_pts <= num_pts_added: break
+
+                        num_pts_added+=1
+                        if i == 0:
+                            self.constr_bounded.add_XV(x_lhs[k])
+                        else:
+                            self.constr_deriv[i-1].add_XV(x_lhs[k])
+
+            print(' DONE - added {} points, time: {}'.format(num_pts_added, formattime(time.time() - t1)))
+
+        self.reset()
+
+        # Gather data in dataframe
+        df = pd.concat([pd.DataFrame(x_lhs), pd.DataFrame(probs)], axis = 1)
+        colnames = ['x_' + str(i+1) for i in range(self.kernel.dim)] + ['P_f' if i == 0 else 'P_df_dx_' + str(i) for i in i_range]
+        df.columns = colnames
+        df['include'] = df.iloc[:,-len(i_range):].min(axis = 1) < p_target
+
+        return df
+
     def find_XV_subop(self, bounds, p_target, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = 1E-10, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'shgo', print_intermediate = True):
         """
         Find the set of virtual observations needed for a set of sub-operators
