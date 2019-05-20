@@ -1531,7 +1531,7 @@ class GPmodel():
         t1 = time.time()
         if verbatim: print('..Running optimization ({}) ...'.format(opt_method), end = '')
         
-        args = (fix_likelihood)
+        args = (fix_likelihood,)
 
         if opt_method == 'differential_evolution':
             res = optimize.differential_evolution(optfun, bounds = bounds, args = args, **opt_args)
