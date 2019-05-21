@@ -694,12 +694,15 @@ class GPmodel():
 
         return df
 
-    def find_XV_subop(self, bounds, p_target, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = 1E-10, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'shgo', print_intermediate = True):
+    def find_XV_subop(self, p_target, Omega = None, bounds = None, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = -1, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'differential_evolution', print_intermediate = True):
         """
         Find the set of virtual observations needed for a set of sub-operators
         
         Input:
         
+        Omega = Finite set of candidate points. If Omega = None then
+        global optimization is performed in the region defined by 'bounds'
+
         bounds = bounds on input space
         p_target = target constraint probability
         i_range = list of indices of sub-operators, e.g. i_range = [0, 2] -> find XV for L = [f, df/dx_2]
@@ -725,6 +728,8 @@ class GPmodel():
             moment_alg = 'correlation-free', 'mtmvnorm'
 
         """
+
+        assert not(Omega is None and bounds is None), 'Need to specity Omega (finite search) or bounds (global optimization)'
         
         # Set list of sub-operators if not specified
         if i_range is None:
@@ -781,8 +786,12 @@ class GPmodel():
             pc_min_i = []
             x_min_i = []
             for i in i_range:
-
-                success, x_min, pc_min = self._argmin_pc_subop(i, nu, bounds, opt_method, moment_approximation, sampling_alg, moment_alg, False, num_samples)
+                
+                if Omega is None:
+                    success, x_min, pc_min = self._argmin_pc_subop(i, nu, bounds, opt_method, moment_approximation, sampling_alg, moment_alg, False, num_samples)
+                else:
+                    pc_min, x_min = self._argmin_pc_subop_finite(i, nu, Omega, sampling_alg, num_samples)
+                    success = True
 
                 if success:
                     pc_min_i.append(pc_min)
@@ -805,7 +814,6 @@ class GPmodel():
             
             if self.constr_bounded is None: i_min = i_min + 1
             
-
             # Store results
             row.append([j, i_min] + list(x_min) + pc_min_i + [pc_xv])
             
@@ -1069,7 +1077,40 @@ class GPmodel():
         if return_res: return res
         return res.success, res.x, np.exp(res.fun)
 
-    
+    def _argmin_pc_subop_finite(self, i, nu, Omega, sampling_alg = 'minimax_tilting', num_samples = 1000, verbatim = False):
+        """
+        Same as _armin_pc_subup but over a finite domain Omega
+        """
+
+        # Calculations only depending on (X, Y)
+        self._prep_Y_centered()
+        self._prep_K_w(verbatim = False)
+        self._prep_K_w_factor(verbatim = False)
+
+        label = 'a < f < b' if i == 0 else 'a < df/dx_{} < b'.format(i)
+        if verbatim: print('Finding argmin(p_c) sub-operator ' + label)
+        
+        # Compute constraint probability for each element in Omega
+        if self._no_const():
+            if verbatim: print('No previous constraints found -- optimizing using unconstrained GP')
+            #p_c = self._constrprob_xs_1(Omega, i, nu)
+            p_c = np.array([self._constrprob_xs_1(x.reshape(1, -1), i, nu)[0] for x in Omega])
+        else:
+            if verbatim: print('Optimizing using estimated constraint probability with {} samples'.format(num_samples))
+            #p_c = self._constrprob_xs_2(Omega, i, nu, num_samples, sampling_alg, verbatim = False)
+            p_c = np.array([self._constrprob_xs_2(x.reshape(1, -1), i, nu, num_samples, sampling_alg, verbatim = False)[0] for x in Omega])
+
+        # Find smallest element
+        idx = p_c.argmin()
+        prob = p_c[idx]
+        argmin = Omega[idx]
+
+        # Return
+        if verbatim:
+            print('Minimum probability = {}, at x = {}'.format(prob, argmin))
+
+        return prob, argmin
+
     def _constr_posterior_dist_1(self, XS, i):
         """
         Return mean and covariance of the i-th constraint at XS
@@ -1149,13 +1190,13 @@ class GPmodel():
 
         # c_v2, c_A2 and c_B2
         c_v2, c_A2, c_B2 = self._constr_prep_1(XS, i)
-        
+
         # c_A, c_B and c_Sigma
         c_A, c_B, c_Sigma = self._constr_prep_2(XS, i, c_v2, c_A2, c_B2)
-        
+
         # Get bound vectors for constraint distribution
         LB, UB = self.calc_constr_bounds_subop(XS, i)
-        
+
         # Widen intervals with nu
         LB = LB - nu
         UB = UB + nu
@@ -1169,12 +1210,13 @@ class GPmodel():
             # Derivative
             Lmu = np.matrix(self.mean*np.ones(len(XS))).T
         
+        t = time.time()
         # Posterior mean
         mu = Lmu + c_A*(self.C_sim - Lmu_XV) + c_B*self.Y_centered
         
         # Posterior standard deviation
         std = np.sqrt(np.diagonal(c_Sigma))
-        
+
         # Calculate probability that the constraint holds at each XS individually 
         # for each sample C_j and take the average over C_j
         if XS.shape[0] == 1:
