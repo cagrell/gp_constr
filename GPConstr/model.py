@@ -416,8 +416,10 @@ class GPmodel():
         self._prep_3(XS, verbatim = self.verbatim)
         
         ### Sample from truncated constraint distribution ###
+        t1 = time.time()
         self._sample_constr_XV(m = num_samples, mu = constr_mean, sigma = self.B1, LB = LB, UB = UB, algorithm = algorithm, resample = resample, verbatim = self.verbatim)
-            
+        sampling_time = [time.time() - t1]
+
         ### Sample from constrained GP ###
         t1 = time.time()
         if self.verbatim: print("..sampling {} times from constrained GP f*|C, Y".format(num_samples), end = '')
@@ -446,7 +448,7 @@ class GPmodel():
         # This corresponds to degenerate Sigma
         #print('Using degenerate Sigma!!')
         #fs_sim = self.mean + self.B*self.Y_centered + self.A*(self.C_sim - Lmu)
-        
+        sampling_time.append(time.time() - t1)
         if self.verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
         
         t1 = time.time()
@@ -469,9 +471,9 @@ class GPmodel():
         if self.verbatim: print(' DONE - Total time: {}'.format(formattime(time.time() - t0)))
             
         if not sigma_PD:
-            print('WARNING: covariance matrix not PD! -- used closest PD matrix, error = {}'.format(err_pd))
+            if self.verbatim: print('WARNING: covariance matrix not PD! -- used closest PD matrix, error = {}'.format(err_pd))
             
-        return mean, var, perc, mode, samples
+        return mean, var, perc, mode, samples, sampling_time
 
     def calc_posterior_constrained_moments(self, XS, corr_free_approx = False):
         """
@@ -694,7 +696,7 @@ class GPmodel():
 
         return df
 
-    def find_XV_subop(self, p_target, Omega = None, bounds = None, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = -1, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'differential_evolution', print_intermediate = True):
+    def find_XV_subop(self, p_target, Omega = None, batch_size = 1, bounds = None, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = -1, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'differential_evolution', print_intermediate = True):
         """
         Find the set of virtual observations needed for a set of sub-operators
         
@@ -768,7 +770,8 @@ class GPmodel():
         self.reset_XV()
     
         pc_min = None
-    
+        i_add_pts = 0 # Number of points added
+
         for j in range(max_iterations):
 
             tj = time.time()
@@ -790,7 +793,7 @@ class GPmodel():
                 if Omega is None:
                     success, x_min, pc_min = self._argmin_pc_subop(i, nu, bounds, opt_method, moment_approximation, sampling_alg, moment_alg, False, num_samples)
                 else:
-                    pc_min, x_min = self._argmin_pc_subop_finite(i, nu, Omega, sampling_alg, num_samples)
+                    pc_min, x_min = self._argmin_pc_subop_finite(i, nu, Omega, batch_size, sampling_alg, num_samples)
                     success = True
 
                 if success:
@@ -815,7 +818,7 @@ class GPmodel():
             if self.constr_bounded is None: i_min = i_min + 1
             
             # Store results
-            row.append([j, i_min] + list(x_min) + pc_min_i + [pc_xv])
+            row.append([j, i_min] + list(x_min) + pc_min_i + [pc_xv] + [time.time() - tj])
             
             if pc_min >= p_target:
                 if self.verbatim: print('DONE - Found {} points. Min. constraint prob = {}. Total time spent = {}'.format(j, pc_min, formattime(time.time() - t0)))
@@ -825,6 +828,7 @@ class GPmodel():
                 if self.verbatim and print_intermediate: print('i = {}, XV[{}] = {}, prob = {}, acc. rate = {}, optimization time = {}'.format(i_min, j+1, x_min, pc_min, pc_xv, formattime(time.time() - tj)))
 
                 # Add point
+                i_add_pts += 1
                 if i_min == 0:
                     self.constr_bounded.add_XV(x_min)
                 else:
@@ -843,9 +847,9 @@ class GPmodel():
 
         # Put results in dataframe and return
         df_out = pd.DataFrame(row)
-        df_out.columns = ['num_Xv', 'update_constr'] + ['Xv[{}]'.format(i+1) for i in range(len(x_min))] + ['pc_{}'.format(i+1) for i in i_range] + ['acc_rate']
+        df_out.columns = ['num_Xv', 'update_constr'] + ['Xv[{}]'.format(i+1) for i in range(len(x_min))] + ['pc_{}'.format(i+1) for i in i_range] + ['acc_rate', 'time']
 
-        return df_out
+        return df_out, i_add_pts, pc_min
         
     
     def _optimize_unconstrained(self, method = 'ML', fix_likelihood = False, bound_min = 1e-6):
@@ -1077,7 +1081,7 @@ class GPmodel():
         if return_res: return res
         return res.success, res.x, np.exp(res.fun)
 
-    def _argmin_pc_subop_finite(self, i, nu, Omega, sampling_alg = 'minimax_tilting', num_samples = 1000, verbatim = False):
+    def _argmin_pc_subop_finite(self, i, nu, Omega, batch_size = 1, sampling_alg = 'minimax_tilting', num_samples = 1000, verbatim = False):
         """
         Same as _armin_pc_subup but over a finite domain Omega
         """
@@ -1090,17 +1094,36 @@ class GPmodel():
         label = 'a < f < b' if i == 0 else 'a < df/dx_{} < b'.format(i)
         if verbatim: print('Finding argmin(p_c) sub-operator ' + label)
         
+        # Split Omega in batches
+        assert batch_size <= Omega.shape[0], 'batch_size must be less than number of elements in Omega'
+
+        num_intervals, rem = np.divmod(Omega.shape[0], batch_size)
+
         # Compute constraint probability for each element in Omega
         if self._no_const():
             if verbatim: print('No previous constraints found -- optimizing using unconstrained GP')
             #p_c = self._constrprob_xs_1(Omega, i, nu)
-            p_c = np.array([self._constrprob_xs_1(x.reshape(1, -1), i, nu)[0] for x in Omega])
+            #p_c = np.array([self._constrprob_xs_1(x.reshape(1, -1), i, nu)[0] for x in Omega])
+            
+            p_c = []
+            for j in range(num_intervals): 
+                p_c += list(self._constrprob_xs_1(Omega[j*batch_size:(j+1)*batch_size], i, nu))
+
+            if rem != 0:
+                p_c += list(self._constrprob_xs_1(Omega[-rem:], i, nu))
         else:
             if verbatim: print('Optimizing using estimated constraint probability with {} samples'.format(num_samples))
             #p_c = self._constrprob_xs_2(Omega, i, nu, num_samples, sampling_alg, verbatim = False)
-            p_c = np.array([self._constrprob_xs_2(x.reshape(1, -1), i, nu, num_samples, sampling_alg, verbatim = False)[0] for x in Omega])
+            #p_c = np.array([self._constrprob_xs_2(x.reshape(1, -1), i, nu, num_samples, sampling_alg, verbatim = False)[0] for x in Omega])
+            p_c = []
+            for j in range(num_intervals): 
+                p_c += list(self._constrprob_xs_2(Omega[j*batch_size:(j+1)*batch_size], i, nu, num_samples, sampling_alg, verbatim = False))
+
+            if rem != 0:
+                p_c += list(self._constrprob_xs_2(Omega[-rem:], i, nu, num_samples, sampling_alg, verbatim = False))
 
         # Find smallest element
+        p_c = np.array(p_c)
         idx = p_c.argmin()
         prob = p_c[idx]
         argmin = Omega[idx]
