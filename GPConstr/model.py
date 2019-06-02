@@ -44,24 +44,153 @@ _scipyopt_test()
 from .r_functions.python_wrappers import rtmvnorm, pmvnorm, mtmvnorm, moments_from_samples
 ##################################################################################
 
-class kernel_RBF():
+# Old kernel class
+# class kernel_RBF():
+#     """
+#     RBF kernel
+#     """
+    
+#     def __init__(self, variance, lengthscale):
+        
+#         self.lengthscale = self._convert_to_array(lengthscale)
+#         self.variance = variance
+#         self.dim = len(self.lengthscale)
+        
+#         assert np.isscalar(variance), 'variance must be scalar'
+       
+#     def __str__(self):
+#         """ What to show when the object is printed """
+#         return '  type = {} \n   input dim = {} \n   lenghtscale = {} \n   variance = {}'.format(
+#             'RBF', self.dim, self.lengthscale, self.variance)
+    
+#     def _convert_to_array(self, v):
+#         if np.isscalar(v):
+#             return np.array([v])
+#         else:
+#             return np.array(v)
+    
+#     def _euclidian_dist_squared(self, X1, X2):
+#         """ Return gram matrix with ||x - y||^2 for each pair of points """
+               
+#         # Use function from sklearn - can replace this later to avoid dependence on sklearn
+#         return sklear_euclidean_distances(X1, X2, squared = True)         
+    
+#     def set_params(self, theta):
+#         """
+#         Set all kernel parameters from a single array theta
+#         .. Used in optimization
+#         """
+#         assert self.dim == (len(theta) - 1), 'Parameter array does not match kernel dimension'
+#         self.variance = theta[0]
+#         self.lengthscale = theta[1:]
+        
+#     def get_params(self):
+#         """
+#         Get all kernel parameters in a single array
+#         .. Used in optimization
+#         """
+#         return np.array([self.variance] + list(self.lengthscale))
+    
+#     def K_gradients(self, X1, X2):
+#         """
+#         Return kernel gradients w.r.t hyperparameters
+        
+#         Returns:
+#         List of Gram matrices of derivatives of K w.r.t. the hyperparameters in the ordering 
+#         given by get_params and set_params
+#         """
+        
+#         R = self.R(X1, X2)
+#         K_R = self.K_R(R)
+        
+#         # W.r.t variance
+#         dK_dv = K_R/self.variance
+        
+#         # W.r.t lengthscales
+#         dK_dR = -0.5*K_R
+        
+#         dK_dl = []
+#         for i in range(len(self.lengthscale)):
+#             t1, t2 = np.meshgrid(X1[:,i], X2[:,i])
+#             dR_dli = ((-2/self.lengthscale[i])*((t1 - t2)/self.lengthscale[i])**2).T
+
+#             dK_dl.append(dK_dR*dR_dli)
+
+#         return [dK_dv] + dK_dl
+    
+#     def R(self, X1, X2):
+#         """ 
+#         Return scaled distances squared 
+#         For RBF kernel: K(X1, X2) = variance * exp(-0.5 * R)
+#         """
+#         return self._euclidian_dist_squared(X1 / self.lengthscale, X2 / self.lengthscale)
+    
+#     def K_R(self, R):
+#         """ Kernel as a function of squared distances """
+#         return self.variance*np.exp(-0.5*R)
+    
+#     def Ri(self, X1, X2, i):
+#         """ 
+#         Returns dR/dX1_i 
+#         Note: dR/dX2_j(X1, X2) = Ri(X2, X1, j).T
+#         """
+#         return (2/self.lengthscale[i]**2)*(X1[:,i].reshape(-1, 1) - X2[:,i].reshape(-1, 1).T)
+    
+#     def Ki0(self, X1, X2, i, R = None, K = None):
+#         """ For K = K(X1, X2), X1 = [X1_1, X1_2, ..], X2 = [X2_1, X2_2, ..] etc., return dK/dX1_i """
+        
+#         # Make use of K or R if they exist
+#         if K is None:
+#             if R is None:
+#                 K = self.K_R(self.R(X1, X2))
+#             else:
+#                 K = self.K_R(R)
+        
+#         return -0.5*K*self.Ri(X1, X2, i)
+    
+#     def Kij(self, X1, X2, i, j, R = None, K = None):
+#         """ For K = K(X1, X2), X1 = [X1_1, X1_2, ..], X2 = [X2_1, X2_2, ..] etc., return d^2K/dX1_i*dX2_j """
+        
+#         # Make use of K or R if they exist
+#         if K is None:
+#             if R is None:
+#                 K = self.K_R(self.R(X1, X2))
+#             else:
+#                 K = self.K_R(R)
+        
+#         F = 1/self.lengthscale[i]**2 if i == j else 0
+        
+#         return K*((1/4)*self.Ri(X1, X2, i)*self.Ri(X1 = X2, X2 = X1, i = j).T + F)    
+            
+    
+#     def K(self, X1, X2):
+#         """ Returns Gram matrix of k(x1, x2) """
+#         return self.K_R(self.R(X1, X2))
+        
+#     def K_diag(self, X):
+#         """ Returns diagonal of Gram matrix of k(x, x) """
+#         return np.ones(len(X))*self.variance
+
+class kernel_Stationary():
     """
-    RBF kernel
+    Superclass for stationary kernels
     """
     
+    kernel_name = ''
+    
     def __init__(self, variance, lengthscale):
-        
+
         self.lengthscale = self._convert_to_array(lengthscale)
         self.variance = variance
         self.dim = len(self.lengthscale)
-        
+
         assert np.isscalar(variance), 'variance must be scalar'
-       
+    
     def __str__(self):
         """ What to show when the object is printed """
         return '  type = {} \n   input dim = {} \n   lenghtscale = {} \n   variance = {}'.format(
-            'RBF', self.dim, self.lengthscale, self.variance)
-    
+            self.kernel_name, self.dim, self.lengthscale, self.variance)
+
     def _convert_to_array(self, v):
         if np.isscalar(v):
             return np.array([v])
@@ -72,7 +201,7 @@ class kernel_RBF():
         """ Return gram matrix with ||x - y||^2 for each pair of points """
                
         # Use function from sklearn - can replace this later to avoid dependence on sklearn
-        return sklear_euclidean_distances(X1, X2, squared = True)         
+        return sklear_euclidean_distances(X1, X2, squared = True)  
     
     def set_params(self, theta):
         """
@@ -99,34 +228,56 @@ class kernel_RBF():
         given by get_params and set_params
         """
         
-        R = self.R(X1, X2)
-        K_R = self.K_R(R)
+        r = self.r(X1, X2)
+        K_r = self.K_r(r)
         
         # W.r.t variance
-        dK_dv = K_R/self.variance
+        dK_dv = K_r/self.variance
         
         # W.r.t lengthscales
-        dK_dR = -0.5*K_R
+        dK_dr = self.dK_dr(r)
+        dr_dl = self.dr_dl(X1, X2)
         
-        dK_dl = []
-        for i in range(len(self.lengthscale)):
-            t1, t2 = np.meshgrid(X1[:,i], X2[:,i])
-            dR_dli = ((-2/self.lengthscale[i])*((t1 - t2)/self.lengthscale[i])**2).T
-
-            dK_dl.append(dK_dR*dR_dli)
+        dK_dl = [dK_dr*dr_dl_i for dr_dl_i in dr_dl]
 
         return [dK_dv] + dK_dl
-    
+
     def R(self, X1, X2):
         """ 
         Return scaled distances squared 
-        For RBF kernel: K(X1, X2) = variance * exp(-0.5 * R)
         """
         return self._euclidian_dist_squared(X1 / self.lengthscale, X2 / self.lengthscale)
     
-    def K_R(self, R):
-        """ Kernel as a function of squared distances """
-        return self.variance*np.exp(-0.5*R)
+    def r(self, X1, X2):
+        """
+        Return scaled distances
+        """
+        return np.sqrt(self.R(X1, X2))
+    
+    def dr_dl(self, X1, X2):
+        """
+        Derivative of r w.r.t. length scales
+        """
+        
+        # r
+        r = self.r(X1, X2)
+        
+        # dr_dR
+        dr_dR = self.dr_dR(r)
+        
+        # dr_dl
+        dr_dl = []
+        for i in range(len(self.lengthscale)):
+            t1, t2 = np.meshgrid(X1[:,i], X2[:,i])
+            dR_dli = ((-2/self.lengthscale[i])*((t1 - t2)/self.lengthscale[i])**2).T
+            dr_dl.append(dr_dR*dR_dli)
+            
+        return dr_dl
+    
+    def dr_dR(self, r):
+        """dr / dR"""
+        f_div_zero = np.vectorize(lambda x: 0.0 if x == 0.0 else 1/(2*x))
+        return f_div_zero(r)
     
     def Ri(self, X1, X2, i):
         """ 
@@ -135,41 +286,173 @@ class kernel_RBF():
         """
         return (2/self.lengthscale[i]**2)*(X1[:,i].reshape(-1, 1) - X2[:,i].reshape(-1, 1).T)
     
-    def Ki0(self, X1, X2, i, R = None, K = None):
-        """ For K = K(X1, X2), X1 = [X1_1, X1_2, ..], X2 = [X2_1, X2_2, ..] etc., return dK/dX1_i """
-        
-        # Make use of K or R if they exist
-        if K is None:
-            if R is None:
-                K = self.K_R(self.R(X1, X2))
-            else:
-                K = self.K_R(R)
-        
-        return -0.5*K*self.Ri(X1, X2, i)
-    
-    def Kij(self, X1, X2, i, j, R = None, K = None):
-        """ For K = K(X1, X2), X1 = [X1_1, X1_2, ..], X2 = [X2_1, X2_2, ..] etc., return d^2K/dX1_i*dX2_j """
-        
-        # Make use of K or R if they exist
-        if K is None:
-            if R is None:
-                K = self.K_R(self.R(X1, X2))
-            else:
-                K = self.K_R(R)
-        
-        F = 1/self.lengthscale[i]**2 if i == j else 0
-        
-        return K*((1/4)*self.Ri(X1, X2, i)*self.Ri(X1 = X2, X2 = X1, i = j).T + F)    
-            
-    
     def K(self, X1, X2):
         """ Returns Gram matrix of k(x1, x2) """
-        return self.K_R(self.R(X1, X2))
+        return self.K_r(self.r(X1, X2))
         
     def K_diag(self, X):
         """ Returns diagonal of Gram matrix of k(x, x) """
         return np.ones(len(X))*self.variance
+    
+    def Ki0(self, X1, X2, i):
+        """ For K = K(X1, X2), X1 = [X1_1, X1_2, ..], X2 = [X2_1, X2_2, ..] etc., return dK/dX1_i """
+        
+        r = self.r(X1, X2)
+        
+        dK_dr = self.dK_dr(r)
+        dr_dR = self.dr_dR(r)
+        dR_dxi = self.Ri(X1, X2, i)
+        
+        return dK_dr*dr_dR*dR_dxi
+    
+    def Kij(self, X1, X2, i, j):
+        """ For K = K(X1, X2), X1 = [X1_1, X1_2, ..], X2 = [X2_1, X2_2, ..] etc., return d^2K/dX1_i*dX2_j """
+        
+        r = self.r(X1, X2) + 1E-50 # make nonzero to avoid handling singularity
+        dK_dr = self.dK_dr(r)
+        d2K_drdr = self.d2K_drdr(r)
+        
+        dr_dR = self.dr_dR(r)
+        dR_dxi = self.Ri(X1, X2, i)
+        dR_dxj = self.Ri(X1 = X2, X2 = X1, i = j).T
+        dr_dxi = dr_dR*dR_dxi
+        dr_dxj = dr_dR*dR_dxj
+        
+        d2R_dxidxj = -2/self.lengthscale[i]**2 if i == j else 0
+        d2r_dxidxj = d2R_dxidxj*dr_dR + dR_dxi*dR_dxj*(-2*dr_dR**3)
+        
+        return d2r_dxidxj*dK_dr + dr_dxi*dr_dxj*d2K_drdr
+    
+    def K_r(self, r):
+        """ Kernel as a function of scaled distances """
+        raise NotImplementedError('Need to implement K_r, dK_dr and d2K_drdr for stationary kernels')
+     
+    def dK_dr(self, r):
+        """
+        Derivative w.r.t scaled distances
+        """
+        raise NotImplementedError('Need to implement K_r, dK_dr and d2K_drdr for stationary kernels')
+    
+    def d2K_drdr(self, r):
+        """
+        Double derivative w.r.t scaled distances
+        """
+        raise NotImplementedError('Need to implement K_r, dK_dr and d2K_drdr for stationary kernels')
+    
+    def Kii_diag(self, X, i):
+        """ Returns diagonal of Gram matrix of d^2K/dX1_i*dX2_i """
+        raise NotImplementedError('Need to implement Kii_diag')
+    
+class kernel_RBF(kernel_Stationary):
+    """
+    RBF kernel
+    """
+    
+    kernel_name = 'RBF'
+    
+    def K_r(self, r):
+        """ Kernel as a function of scaled distances """
+        return self.variance*np.exp(-0.5*r**2)
+     
+    def dK_dr(self, r):
+        """
+        Derivative w.r.t scaled distances
+        """
+        return -r*self.K_r(r)
+    
+    def d2K_drdr(self, r):
+        """
+        Double derivative w.r.t scaled distances
+        """
+        return (r**2 - 1)*self.K_r(r)
+    
+    
+    def Ki0(self, X1, X2, i):
+        """ Overload generic with faster alternative """
+        
+        # Include K and r as input to use this
+        # Make use of K or r if they exist 
+        ##if K is None:
+        ##    if r is None:
+        ##        K = self.K(X1, X2)
+        ##    else:
+        ##        K = self.K_r(r)
+        
+        return -0.5*self.K(X1, X2)*self.Ri(X1, X2, i)
+        
+    
+    def Kij(self, X1, X2, i, j):
+        """ Overload generic with faster alternative """
+        
+        # Include K and r as input to use this
+        # Make use of K or r if they exist 
+        ##if K is None:
+        ##    if r is None:
+        ##        K = self.K(X1, X2)
+        ##    else:
+        ##        K = self.K_r(r)
+        
+        F = 1/self.lengthscale[i]**2 if i == j else 0
+        K = self.K(X1, X2)
+        return K*((1/4)*self.Ri(X1, X2, i)*self.Ri(X1 = X2, X2 = X1, i = j).T + F)    
 
+    def Kii_diag(self, X, i):
+        """ Returns diagonal of Gram matrix of d^2K/dX1_i*dX2_i """
+        const = self.variance/(self.lengthscale[i]**2)
+        return np.ones(len(X))*const
+
+
+class kernel_Matern52(kernel_Stationary):
+    """
+    Matern 5/2 kernel
+    """
+    
+    kernel_name = 'Matern52'
+    
+    def K_r(self, r):
+        """ Kernel as a function of scaled distances """
+        return self.variance*(1 + np.sqrt(5)*r + 5/3*r**2)*np.exp(-np.sqrt(5)*r)
+     
+    def dK_dr(self, r):
+        """
+        Derivative w.r.t scaled distances
+        """
+        return -5/3*self.variance*(r + np.sqrt(5)*r**2)*np.exp(-np.sqrt(5)*r)
+        
+    def d2K_drdr(self, r):
+        """
+        Double derivative w.r.t scaled distances
+        """
+        return -5/3*self.variance*(1 + np.sqrt(5)*r - 5*r**2)*np.exp(-np.sqrt(5)*r)
+    
+    def Kii_diag(self, X, i):
+        """ Returns diagonal of Gram matrix of d^2K/dX1_i*dX2_i """
+        const = self.variance*(5/3)*(1/self.lengthscale[i]**2)
+        return np.ones(len(X))*const
+    
+            
+class kernel_RBF_generic(kernel_Stationary):
+    """
+    RBF kernel, use generic set-up for testing
+    """
+    
+    kernel_name = 'RBF_generic'
+    
+    def K_r(self, r):
+        """ Kernel as a function of scaled distances """
+        return self.variance*np.exp(-0.5*r**2)
+     
+    def dK_dr(self, r):
+        """
+        Derivative w.r.t scaled distances
+        """
+        return -r*self.K_r(r)
+    
+    def d2K_drdr(self, r):
+        """
+        Double derivative w.r.t scaled distances
+        """
+        return (r**2 - 1)*self.K_r(r)
 
 class Constraint():
     """ 
@@ -696,7 +979,7 @@ class GPmodel():
 
         return df
 
-    def find_XV_subop(self, p_target, Omega = None, batch_size = 1, bounds = None, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = -1, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'differential_evolution', print_intermediate = True):
+    def find_XV_subop(self, p_target, Omega = None, batch_size = 1, bounds = None, i_range = None, nu = None, max_iterations = 200, moment_approximation = False, num_samples = 1000, min_prob_unconstr_xv = None, sampling_alg = 'minimax_tilting', moment_alg = 'correlation-free', opt_method = 'differential_evolution', print_intermediate = True):
         """
         Find the set of virtual observations needed for a set of sub-operators
         
@@ -743,9 +1026,10 @@ class GPmodel():
             if self.constr_deriv is not None:
                 i_range = i_range + [i+1 for i in range(len(self.constr_deriv))] 
         
-        if min_prob_unconstr_xv < 1E-6 and not moment_approximation and sampling_alg == 'rejection':
-            if self.verbatim: print('WARNING: very low acceptance rate criterion for rejection sampling. min_prob_unconstr_xv = ' + str(min_prob_unconstr_xv))
-        
+        if min_prob_unconstr_xv is not None:
+            if min_prob_unconstr_xv < 1E-6 and not moment_approximation and sampling_alg == 'rejection':
+                if self.verbatim: print('WARNING: very low acceptance rate criterion for rejection sampling. min_prob_unconstr_xv = ' + str(min_prob_unconstr_xv))
+            
         # Start timer
         t0 = time.time()
 
@@ -776,20 +1060,22 @@ class GPmodel():
 
             tj = time.time()
 
-            # Check for criteria on minimum probability at XV using the unconstrained distribution
-            # If this is too small the sampling becomes difficult
-            if j == 0:
-                pc_xv = self.constrprob_Xv(nu) if self.__has_xv() else 1
+            if min_prob_unconstr_xv is not None:
+                # Check for criteria on minimum probability at XV using the unconstrained distribution
+                # If this is too small the sampling becomes difficult
+                if j == 0:
+                    pc_xv = self.constrprob_Xv(nu) if self.__has_xv() else 1
 
-            if pc_xv < min_prob_unconstr_xv:
-                if self.verbatim: print('ABORTED: Too low acceptance rate ({}) - Found {} points. Min. constraint prob = {}. Total time spent = {}'.format(pc_xv, j, pc_min, formattime(time.time() - t0)))
-                break
+                if pc_xv < min_prob_unconstr_xv:
+                    if self.verbatim: print('ABORTED: Too low acceptance rate ({}) - Found {} points. Min. constraint prob = {}. Total time spent = {}'.format(pc_xv, j, pc_min, formattime(time.time() - t0)))
+                    break
 
             # Run global optimization for each sub-operator in the list
             pc_min_i = []
             x_min_i = []
+
             for i in i_range:
-                
+
                 if Omega is None:
                     success, x_min, pc_min = self._argmin_pc_subop(i, nu, bounds, opt_method, moment_approximation, sampling_alg, moment_alg, False, num_samples)
                 else:
@@ -808,7 +1094,7 @@ class GPmodel():
                     df_out = pd.DataFrame(row)
                     df_out.columns = ['num_Xv', 'update_constr'] + ['Xv[{}]'.format(i+1) for i in range(len(x_min))] + ['pc_{}'.format(i+1) for i in i_range] + ['acc_rate']
                     return df_out
-
+            
             # Choose sub-operator with smallest probability
             pc_min = min(pc_min_i)
             
@@ -818,14 +1104,20 @@ class GPmodel():
             if self.constr_bounded is None: i_min = i_min + 1
             
             # Store results
-            row.append([j, i_min] + list(x_min) + pc_min_i + [pc_xv] + [time.time() - tj])
+            if min_prob_unconstr_xv is not None:
+                row.append([j, i_min] + list(x_min) + pc_min_i + [pc_xv] + [time.time() - tj])
+            else:
+                row.append([j, i_min] + list(x_min) + pc_min_i + [time.time() - tj])
             
             if pc_min >= p_target:
                 if self.verbatim: print('DONE - Found {} points. Min. constraint prob = {}. Total time spent = {}'.format(j, pc_min, formattime(time.time() - t0)))
                 break
 
             else:
-                if self.verbatim and print_intermediate: print('i = {}, XV[{}] = {}, prob = {}, acc. rate = {}, optimization time = {}'.format(i_min, j+1, x_min, pc_min, pc_xv, formattime(time.time() - tj)))
+                if min_prob_unconstr_xv is not None:
+                    if self.verbatim and print_intermediate: print('i = {}, XV[{}] = {}, prob = {}, acc. rate = {}, optimization time = {}'.format(i_min, j+1, x_min, pc_min, pc_xv, formattime(time.time() - tj)))
+                else:
+                    if self.verbatim and print_intermediate: print('i = {}, XV[{}] = {}, prob = {}, optimization time = {}'.format(i_min, j+1, x_min, pc_min, formattime(time.time() - tj)))
 
                 # Add point
                 i_add_pts += 1
@@ -837,9 +1129,10 @@ class GPmodel():
                 # Reset computations depending on XV
                 self.reset_XV()
                 
-                # Compute new acceptance rate
-                if j != 0:
-                    pc_xv = self.constrprob_Xv(nu) 
+                if min_prob_unconstr_xv is not None:
+                    # Compute new acceptance rate
+                    if j != 0:
+                        pc_xv = self.constrprob_Xv(nu) 
                 
                 if j+1 == max_iterations:
                     if self.verbatim: print('DONE - Found {} points. Min. constraint prob = {}. Total time spent = {}'.format(j+1, pc_min, formattime(time.time() - t0)))
@@ -847,7 +1140,11 @@ class GPmodel():
 
         # Put results in dataframe and return
         df_out = pd.DataFrame(row)
-        df_out.columns = ['num_Xv', 'update_constr'] + ['Xv[{}]'.format(i+1) for i in range(len(x_min))] + ['pc_{}'.format(i+1) for i in i_range] + ['acc_rate', 'time']
+
+        if min_prob_unconstr_xv is not None:
+            df_out.columns = ['num_Xv', 'update_constr'] + ['Xv[{}]'.format(i+1) for i in range(len(x_min))] + ['pc_{}'.format(i+1) for i in i_range] + ['acc_rate', 'time']
+        else:
+            df_out.columns = ['num_Xv', 'update_constr'] + ['Xv[{}]'.format(i+1) for i in range(len(x_min))] + ['pc_{}'.format(i+1) for i in i_range] + ['time']
 
         return df_out, i_add_pts, pc_min
         
@@ -1187,6 +1484,74 @@ class GPmodel():
         #return norm_cdf_int(np.array(mu)[:,0], std, LB, UB) # Exact
         return norm_cdf_int_approx(np.array(mu)[:,0], std, LB, UB) # Aprroximation within E-7 error
         
+    # def _constrprob_xs_2_OLD(self, XS, i, nu, num_samples, algorithm, verbatim = False):
+    #     """
+    #     Return the probability that the i-th constraint is satisfied at XS
+        
+    #     C~(XS) | Y, C
+    #     """
+        
+    #     # Calculations only depending on (X, Y)
+    #     self._prep_Y_centered()
+    #     self._prep_K_w(verbatim = verbatim)
+    #     self._prep_K_w_factor(verbatim = verbatim)
+        
+    #     # Calculations only depending on (X, XV) - v1, A1 and B1
+    #     self._prep_2(verbatim = verbatim)
+        
+    #     # Calculate mean of constraint distribution at XV (covariance is B1)
+    #     Lmu_XV, constr_mean = self._calc_constr_mean()
+        
+    #     # Get bound vectors for constraint distribution
+    #     LB, UB = self._calc_constr_bounds()
+        
+    #     # Sample from truncated constraint distribution 
+    #     self._sample_constr_XV(m = num_samples, mu = constr_mean, sigma = self.B1, LB = LB, UB = UB, algorithm = algorithm, resample = False, verbatim = verbatim)
+
+    #     # c_v2, c_A2 and c_B2
+    #     c_v2, c_A2, c_B2 = self._constr_prep_1(XS, i)
+
+    #     # c_A, c_B and c_Sigma
+    #     c_A, c_B, c_Sigma = self._constr_prep_2(XS, i, c_v2, c_A2, c_B2)
+
+    #     # Get bound vectors for constraint distribution
+    #     LB, UB = self.calc_constr_bounds_subop(XS, i)
+
+    #     # Widen intervals with nu
+    #     LB = LB - nu
+    #     UB = UB + nu
+        
+    #     # Prior mean
+    #     if i == 0:
+    #         # Boundedness
+    #         Lmu = np.matrix(np.zeros(len(XS))).T
+            
+    #     else:
+    #         # Derivative
+    #         Lmu = np.matrix(self.mean*np.ones(len(XS))).T
+        
+    #     t = time.time()
+    #     # Posterior mean
+    #     mu = Lmu + c_A*(self.C_sim - Lmu_XV) + c_B*self.Y_centered
+        
+    #     # Posterior standard deviation
+    #     std = np.sqrt(np.diagonal(c_Sigma))
+
+    #     # Calculate probability that the constraint holds at each XS individually 
+    #     # for each sample C_j and take the average over C_j
+    #     if XS.shape[0] == 1:
+            
+    #         # Faster for single input
+    #         probs = norm_cdf_int_approx(np.array(mu)[0], std, LB, UB)
+    #         probs = np.array([probs.mean()])
+            
+    #     else:
+    #         probs = np.apply_along_axis(norm_cdf_int_approx, axis = 0, arr = np.array(mu), std = std, LB = LB, UB = UB)
+    #         probs = probs.mean(axis = 1)
+            
+    #     # Return probability
+    #     return probs
+
     def _constrprob_xs_2(self, XS, i, nu, num_samples, algorithm, verbatim = False):
         """
         Return the probability that the i-th constraint is satisfied at XS
@@ -1212,10 +1577,34 @@ class GPmodel():
         self._sample_constr_XV(m = num_samples, mu = constr_mean, sigma = self.B1, LB = LB, UB = UB, algorithm = algorithm, resample = False, verbatim = verbatim)
 
         # c_v2, c_A2 and c_B2
-        c_v2, c_A2, c_B2 = self._constr_prep_1(XS, i)
+        # Only compute diagonal elements of constraint covariance
+        #c_v2, c_A2, c_B2 = self._constr_prep_1(XS, i)
+        if i == 0:
+            # Boundedness
+            L2T_K_X_XS = np.matrix(self.kernel.K(self.X_training, XS))
+            L1L2T_K_XS_XS_diag = np.matrix(self.kernel.K_diag(XS))
+        
+        else:
+            L2T_K_X_XS = np.matrix(self.kernel.Ki0(XS, self.X_training, i-1)).T
+            L1L2T_K_XS_XS_diag = np.matrix(self.kernel.Kii_diag(XS, i-1))
 
+        c_v2 = triang_solve(self.K_w_chol, L2T_K_X_XS) 
+        c_A2 = triang_solve(self.K_w_chol, c_v2, trans = True).T 
+        
         # c_A, c_B and c_Sigma
-        c_A, c_B, c_Sigma = self._constr_prep_2(XS, i, c_v2, c_A2, c_B2)
+        #c_A, c_B, c_Sigma = self._constr_prep_2(XS, i, c_v2, c_A2, c_B2)
+        L1L2T_XS_XV = self._calc_FiL2T(XS, i)
+        
+        c_B3 = L1L2T_XS_XV - c_v2.T*self.v1
+        
+        self._prep_L1() # Compute L_1
+        c_v3 = triang_solve(self.L_1, c_B3.T) 
+        
+        c_A = triang_solve(self.L_1, c_v3, trans = True).T 
+        c_B = c_A2 - c_A*self.A1
+        
+        #c_Sigma = c_B2 - c_v3.T*c_v3
+        c_Sigma_diag = np.matrix(L1L2T_K_XS_XS_diag - np.square(c_v2).sum(0) - np.square(c_v3).sum(0)).T
 
         # Get bound vectors for constraint distribution
         LB, UB = self.calc_constr_bounds_subop(XS, i)
@@ -1238,7 +1627,8 @@ class GPmodel():
         mu = Lmu + c_A*(self.C_sim - Lmu_XV) + c_B*self.Y_centered
         
         # Posterior standard deviation
-        std = np.sqrt(np.diagonal(c_Sigma))
+        #std = np.sqrt(np.diagonal(c_Sigma))
+        std = np.array(np.sqrt(c_Sigma_diag)).flatten()
 
         # Calculate probability that the constraint holds at each XS individually 
         # for each sample C_j and take the average over C_j
@@ -1879,10 +2269,6 @@ class GPmodel():
         """
         
         L1L2T_XS_XV = self._calc_FiL2T(XS, i)
-        
-        #Check
-        #self.TMP_FiL2T_XS_XV = L1L2T_XS_XV
-        #self.TMP_L1L2T_XS_XV = self._calc_L1L2()
         
         c_B3 = L1L2T_XS_XV - c_v2.T*self.v1
         
