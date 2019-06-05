@@ -1079,7 +1079,7 @@ class GPmodel():
                 if Omega is None:
                     success, x_min, pc_min = self._argmin_pc_subop(i, nu, bounds, opt_method, moment_approximation, sampling_alg, moment_alg, False, num_samples)
                 else:
-                    pc_min, x_min = self._argmin_pc_subop_finite(i, nu, Omega, batch_size, sampling_alg, num_samples)
+                    pc_min, x_min = self._argmin_pc_subop_finite(i, nu, Omega, batch_size, sampling_alg, num_samples, moment_approximation, moment_alg)
                     success = True
 
                 if success:
@@ -1378,7 +1378,7 @@ class GPmodel():
         if return_res: return res
         return res.success, res.x, np.exp(res.fun)
 
-    def _argmin_pc_subop_finite(self, i, nu, Omega, batch_size = 1, sampling_alg = 'minimax_tilting', num_samples = 1000, verbatim = False):
+    def _argmin_pc_subop_finite(self, i, nu, Omega, batch_size = None, sampling_alg = 'minimax_tilting', num_samples = 1000, moment_approximation = False, moment_alg = 'minimax_tilting', verbatim = False):
         """
         Same as _armin_pc_subup but over a finite domain Omega
         """
@@ -1391,6 +1391,8 @@ class GPmodel():
         label = 'a < f < b' if i == 0 else 'a < df/dx_{} < b'.format(i)
         if verbatim: print('Finding argmin(p_c) sub-operator ' + label)
         
+        if batch_size is None: batch_size = Omega.shape[0]
+
         # Split Omega in batches
         assert batch_size <= Omega.shape[0], 'batch_size must be less than number of elements in Omega'
 
@@ -1414,10 +1416,16 @@ class GPmodel():
             #p_c = np.array([self._constrprob_xs_2(x.reshape(1, -1), i, nu, num_samples, sampling_alg, verbatim = False)[0] for x in Omega])
             p_c = []
             for j in range(num_intervals): 
-                p_c += list(self._constrprob_xs_2(Omega[j*batch_size:(j+1)*batch_size], i, nu, num_samples, sampling_alg, verbatim = False))
+                if moment_approximation:
+                    p_c += list(self._constrprob_xs_2_momentapprox(Omega[j*batch_size:(j+1)*batch_size], i, nu, moment_alg, verbatim = False))
+                else:
+                    p_c += list(self._constrprob_xs_2(Omega[j*batch_size:(j+1)*batch_size], i, nu, num_samples, sampling_alg, verbatim = False))
 
             if rem != 0:
-                p_c += list(self._constrprob_xs_2(Omega[-rem:], i, nu, num_samples, sampling_alg, verbatim = False))
+                if moment_approximation:
+                    p_c += list(self._constrprob_xs_2_momentapprox(Omega[-rem:], i, nu, moment_alg, verbatim = False))
+                else:
+                    p_c += list(self._constrprob_xs_2(Omega[-rem:], i, nu, num_samples, sampling_alg, verbatim = False))
 
         # Find smallest element
         p_c = np.array(p_c)
@@ -1646,18 +1654,19 @@ class GPmodel():
         return probs
         
 
-    def _constrprob_xs_2_momentapprox(self, XS, i, nu, algorithm, verbatim = False):
+    def _constrprob_xs_2_momentapprox(self, XS, i, nu, algorithm = 'minimax_tilting', verbatim = False):
         """
         Return the probability that the i-th constraint is satisfied at XS using moment approximation
 
         algorithm =  'correlation-free' -> Using correlation free approximation
         algorithm =  'mtmvnorm' -> Using R-package mtvmnorm 
+        algorithm =  'minimax_tilting' -> Using samples
         algorithm =  'Genz' -> NOT YET IMPLEMENTED! (Using Genz approximation)
 
         C~(XS) | Y, C
         """
 
-        assert algorithm in ['correlation-free', 'mtmvnorm'], 'unknown algorithm = ' + algorithm
+        assert algorithm in ['correlation-free', 'mtmvnorm', 'minimax_tilting'], 'unknown algorithm = ' + algorithm
 
         # Calculations only depending on (X, Y)
         self._prep_Y_centered()
@@ -1687,10 +1696,17 @@ class GPmodel():
             # Using correlation free approximation
             tmu, tvar = trunc_norm_moments_approx_corrfree(mu = np.array(constr_mean).flatten(), sigma = self.B1, LB = LB, UB = UB)
             trunc_mu, trunc_cov = np.matrix(tmu).T, np.matrix(np.diag(tvar))
-        else:
+        
+        if algorithm =='mtmvnorm':
             # Using mtmvnorm algorithm 
             trunc_moments = mtmvnorm(mu = constr_mean, sigma = self.B1, a = LB, b = UB)
             trunc_mu, trunc_cov = np.matrix(trunc_moments[0]).T, np.matrix(trunc_moments[1])
+        
+        if algorithm =='minimax_tilting':
+            # Using samples from minimax tilting 
+            trunc_mu, trunc_cov = moments_from_samples(1000 , constr_mean, self.B1, LB, UB, algorithm = 'minimax_tilting')
+            trunc_mu = np.matrix(trunc_mu).T
+            trunc_cov = np.matrix(trunc_cov)        
 
         if verbatim: print(' DONE - time: {}'.format(formattime(time.time() - t1)))
 
