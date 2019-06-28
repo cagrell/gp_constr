@@ -22,7 +22,7 @@ __R (3.4.3)__
 ### Examples
 Some examples are given in jupyter notebooks. [pyDOE](https://pythonhosted.org/pyDOE/) is used to generate training data, and plots are created using [plotly](https://github.com/plotly/plotly.py) with some [custom plotting functions](https://github.com/cagrell/gp_plotly) for GPs.
 - [__Example_1a.ipynb__](https://github.com/cagrell/gp_constr/blob/master/Example_1a.ipynb) _1D example of boundedness and monotonicity constraints_
-- [__Example_1b.ipynb__](https://github.com/cagrell/gp_constr/blob/master/Example_1a.ipynb) _1D example of boundedness and monotonicity constraints - with noise_
+- [__Example_1b.ipynb__](https://github.com/cagrell/gp_constr/blob/master/Example_1b.ipynb) _1D example of boundedness and monotonicity constraints - with noise_
 - [__Example_2.ipynb__](https://github.com/cagrell/gp_constr/blob/master/Example_2.ipynb) _Emulation in 4D with derivative information_
 - [__Example_3.ipynb__](https://github.com/cagrell/gp_constr/blob/master/Example_3.ipynb) _Regression in 5D with derivative information_
 
