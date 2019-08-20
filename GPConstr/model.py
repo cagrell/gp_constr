@@ -1044,11 +1044,11 @@ class GPmodel():
         # Prior mean
         if i == 0:
             # Boundedness
-            Lmu = np.matrix(np.zeros(len(XS))).T
+            Lmu = np.matrix(self.mean*np.ones(len(XS))).T
             
         else:
             # Derivative
-            Lmu = np.matrix(self.mean*np.ones(len(XS))).T
+            Lmu = np.matrix(np.zeros(len(XS))).T
             
         # Posterior mean
         mu = Lmu + c_A2*self.Y_centered
@@ -1211,11 +1211,11 @@ class GPmodel():
         # Prior mean
         if i == 0:
             # Boundedness
-            Lmu = np.matrix(np.zeros(len(XS))).T
+            Lmu = np.matrix(self.mean*np.ones(len(XS))).T
             
         else:
             # Derivative
-            Lmu = np.matrix(self.mean*np.ones(len(XS))).T
+            Lmu = np.matrix(np.zeros(len(XS))).T
         
         t = time.time()
         # Posterior mean
@@ -1304,11 +1304,11 @@ class GPmodel():
         # Prior mean
         if i == 0:
             # Boundedness
-            Lmu = np.matrix(np.zeros(len(XS))).T
+            Lmu = np.matrix(self.mean*np.ones(len(XS))).T
             
         else:
             # Derivative
-            Lmu = np.matrix(self.mean*np.ones(len(XS))).T
+            Lmu = np.matrix(np.zeros(len(XS))).T
         
         # Posterior mean
         mean = Lmu + c_B*self.Y_centered + c_A*(trunc_mu - Lmu_XV)
