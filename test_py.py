@@ -1,7 +1,9 @@
 
 # For checking that importing the model with R dependency works ok
 
-from GPConstr.model import kernel_RBF, GPmodel, Constraint
+from GPConstr.model import GPmodel, Constraint
+from GPConstr.kern import kernel_RBF
+
 import pyDOE
 import numpy as np
 
